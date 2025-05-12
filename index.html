@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lemmings Web Clone</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="game-container">
+        <div class="game-header">
+            <h1>Lemmings Web Clone</h1>
+            <div class="game-controls">
+                <div class="lemming-count">Lemmings: <span id="lemming-count">0</span>/<span id="lemming-total">0</span></div>
+                <div class="saved-count">Saved: <span id="saved-count">0</span></div>
+                <div class="time">Time: <span id="time-remaining">0:00</span></div>
+            </div>
+            <div class="ability-controls">
+                <button id="ability-climber" class="ability-btn">Climber</button>
+                <button id="ability-floater" class="ability-btn">Floater</button>
+                <button id="ability-bomber" class="ability-btn">Bomber</button>
+                <button id="ability-blocker" class="ability-btn">Blocker</button>
+                <button id="ability-builder" class="ability-btn">Builder</button>
+                <button id="ability-basher" class="ability-btn">Basher</button>
+                <button id="ability-miner" class="ability-btn">Miner</button>
+                <button id="ability-digger" class="ability-btn">Digger</button>
+            </div>
+            <div class="game-speed">                <button id="speed-decrease">-</button>
+                <span id="current-speed">1x</span>
+                <button id="speed-increase">+</button>
+                <button id="pause-btn">Pause</button>
+                <button id="help-btn">Help</button>
+                <button id="sound-btn">🔊</button>
+            </div>
+        </div>
+        <canvas id="game-canvas"></canvas>
+        <div id="level-select" class="level-select">
+            <h2>Select Level</h2>
+            <div class="levels-container">
+                <!-- Levels will be dynamically added here -->
+            </div>
+        </div>
+        
+        <!-- Level complete modal -->
+        <div id="level-complete" class="modal">
+            <div class="modal-content">
+                <h2 id="level-result-title">Level Complete!</h2>
+                <p id="level-result-message">You saved <span id="saved-lemmings">0</span> out of <span id="total-lemmings">0</span> lemmings.</p>
+                <div class="modal-buttons">
+                    <button id="next-level-btn">Next Level</button>
+                    <button id="retry-level-btn">Retry Level</button>
+                    <button id="level-select-btn">Level Select</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Help modal -->
+        <div id="help-modal" class="modal">
+            <div class="modal-content">
+                <h2>How to Play</h2>
+                <p>Guide lemmings from the entrance to the exit by assigning them different abilities.</p>
+                <h3>Controls:</h3>
+                <ul>
+                    <li><strong>Click</strong> on a lemming to assign the selected ability</li>
+                    <li><strong>1-8 Keys</strong> to quickly select abilities</li>
+                    <li><strong>P</strong> to pause the game</li>
+                    <li><strong>+/-</strong> to adjust game speed</li>
+                    <li><strong>D</strong> to toggle debug mode</li>
+                    <li><strong>ESC</strong> to return to level selection</li>
+                </ul>
+                <h3>Abilities:</h3>
+                <ul>
+                    <li><strong>Climber:</strong> Climb vertical walls</li>
+                    <li><strong>Floater:</strong> Fall safely from any height</li>
+                    <li><strong>Bomber:</strong> Explode after a countdown</li>
+                    <li><strong>Blocker:</strong> Block other lemmings</li>
+                    <li><strong>Builder:</strong> Build a diagonal bridge</li>
+                    <li><strong>Basher:</strong> Dig horizontally</li>
+                    <li><strong>Miner:</strong> Dig diagonally down</li>
+                    <li><strong>Digger:</strong> Dig straight down</li>
+                </ul>
+                <button id="close-help-btn">Close</button>
+            </div>
+        </div>
+    </div>    <!-- Scripts -->
+    <script type="module" src="js/utils.js"></script>
+    <script type="module" src="js/sound.js"></script>
+    <script type="module" src="js/assets.js"></script>
+    <script type="module" src="js/terrain.js"></script>
+    <script type="module" src="js/lemming.js"></script>
+    <script type="module" src="js/levels.js"></script>
+    <script type="module" src="js/game.js"></script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

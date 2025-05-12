@@ -10,6 +10,11 @@ export class SoundManager {
         this.sounds = {};
         this.isMuted = false;
         
+        // Background music properties
+        this.backgroundMusic = null;
+        this.musicGainNode = null;
+        this.currentMusicLoop = null;
+        
         // Try to initialize audio (needs to be done after user interaction)
         this.init();
     }
@@ -287,6 +292,150 @@ export class SoundManager {
      */
     toggleMute() {
         this.isMuted = !this.isMuted;
+        
+        // Also mute/unmute background music if it's playing
+        if (this.musicGainNode) {
+            this.musicGainNode.gain.value = this.isMuted ? 0 : 0.3;
+        }
+        
         return this.isMuted;
+    }
+    
+    /**
+     * Create procedural background music for gameplay
+     * @param {string} type - Type of music: 'gameplay', 'success', or 'failure'
+     */
+    createBackgroundMusic(type = 'gameplay') {
+        if (!this.audioContext) return;
+        
+        // Stop any currently playing music
+        this.stopBackgroundMusic();
+        
+        // Create gain node for volume control
+        this.musicGainNode = this.audioContext.createGain();
+        this.musicGainNode.gain.value = this.isMuted ? 0 : 0.3; // Lower volume for background music
+        this.musicGainNode.connect(this.audioContext.destination);
+        
+        let noteDuration, pattern, baseFreq, noteSpacing, musicLength;
+        
+        switch(type) {
+            case 'success':
+                // Cheerful, upbeat music for level completion
+                noteDuration = 0.15;
+                noteSpacing = 0.17;
+                baseFreq = 440; // A4
+                pattern = [0, 4, 7, 12, 7, 4, 7, 12]; // Major scale pattern
+                musicLength = pattern.length * noteSpacing;
+                break;
+                
+            case 'failure':
+                // Sad, minor music for level failure
+                noteDuration = 0.3;
+                noteSpacing = 0.35;
+                baseFreq = 392; // G4
+                pattern = [0, 3, 7, 10, 7, 3]; // Minor scale pattern
+                musicLength = pattern.length * noteSpacing;
+                break;
+                
+            case 'gameplay':
+            default:
+                // Default gameplay background music - quirky, catchy loop
+                noteDuration = 0.2;
+                noteSpacing = 0.22;
+                baseFreq = 330; // E4
+                pattern = [0, 4, 7, 4, 0, 5, 9, 5, 2, 7, 11, 7, 0, 4, 7, 12];
+                musicLength = pattern.length * noteSpacing;
+                break;
+        }
+        
+        // Create a buffer for the melody pattern
+        const buffer = this.audioContext.createBuffer(
+            1,
+            this.audioContext.sampleRate * musicLength,
+            this.audioContext.sampleRate
+        );
+        
+        const data = buffer.getChannelData(0);
+        
+        // Generate the music pattern
+        for (let i = 0; i < pattern.length; i++) {
+            const note = pattern[i];
+            const freq = this.getNoteFrequency(baseFreq, note);
+            const startSample = Math.floor(i * noteSpacing * this.audioContext.sampleRate);
+            const endSample = Math.floor((i * noteSpacing + noteDuration) * this.audioContext.sampleRate);
+            
+            // Generate a simple tone with envelope
+            for (let j = startSample; j < endSample && j < buffer.length; j++) {
+                const t = (j - startSample) / (endSample - startSample); // Time position within note (0-1)
+                const envelope = Math.sin(t * Math.PI); // Simple envelope: fade in, fade out
+                data[j] += Math.sin(freq * 2 * Math.PI * (j / this.audioContext.sampleRate)) * envelope * 0.3;
+            }
+        }
+        
+        this.backgroundMusic = buffer;
+    }
+    
+    /**
+     * Calculate frequency for a note
+     * @param {number} baseFreq - Base frequency
+     * @param {number} semitones - Number of semitones from base frequency
+     * @returns {number} - Resulting frequency
+     */
+    getNoteFrequency(baseFreq, semitones) {
+        return baseFreq * Math.pow(2, semitones / 12);
+    }
+    
+    /**
+     * Play background music in a loop
+     * @param {string} type - Type of music: 'gameplay', 'success', or 'failure' 
+     * @param {boolean} loop - Whether to loop the music
+     */
+    playBackgroundMusic(type = 'gameplay', loop = true) {
+        if (!this.audioContext) return;
+        
+        // Create the music if we don't have it or need a different type
+        this.createBackgroundMusic(type);
+        
+        try {
+            // Need to resume audio context if it was suspended (browser policy)
+            if (this.audioContext.state === 'suspended') {
+                this.audioContext.resume();
+            }
+            
+            const source = this.audioContext.createBufferSource();
+            source.buffer = this.backgroundMusic;
+            source.loop = loop;
+            source.connect(this.musicGainNode);
+            source.start();
+            
+            // Store the current audio source for later stopping
+            this.currentMusicLoop = source;
+        } catch(e) {
+            console.error("Error playing background music:", e);
+        }
+    }
+    
+    /**
+     * Stop background music if it's playing
+     */
+    stopBackgroundMusic() {
+        if (this.currentMusicLoop) {
+            try {
+                this.currentMusicLoop.stop();
+            } catch (e) {
+                console.log("Couldn't stop music (might already be stopped):", e);
+            }
+            this.currentMusicLoop = null;
+        }
+    }
+    
+    /**
+     * Set the volume of the background music
+     * @param {number} volume - Volume from 0 to 1
+     */
+    setMusicVolume(volume) {
+        if (this.musicGainNode) {
+            this.musicGainNode.gain.value = volume;
+        }
     }
 }

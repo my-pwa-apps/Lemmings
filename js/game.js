@@ -281,6 +281,11 @@ export class Game {
             this.lastTime = performance.now();
             requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
         }
+        
+        // Play background music for the gameplay
+        this.sound.playBackgroundMusic('gameplay', true);
+        
+        console.log(`Starting level ${levelId}: ${this.currentLevel.name}`);
     }
     
     /**

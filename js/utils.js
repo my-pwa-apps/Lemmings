@@ -22,6 +22,8 @@ const COLORS = {
     }
 };
 
+export { COLORS };
+
 /**
  * Clamp a value between min and max
  */

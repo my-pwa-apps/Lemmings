@@ -113,3 +113,5 @@ class LevelManager {
         }));
     }
 }
+
+export { LevelManager };

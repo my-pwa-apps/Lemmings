@@ -3,7 +3,7 @@
  * All visual elements are procedurally generated here instead of loading image files
  */
 
-class Assets {
+export class Assets {
     constructor(game) {
         this.game = game;
         this.sprites = {};

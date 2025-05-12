@@ -563,4 +563,4 @@ export class Game {
     }
 }
 
-export { Game };
+// Export is already handled with the class declaration

@@ -131,4 +131,4 @@ export class LevelManager {
     }
 }
 
-export { LevelManager };
+// Export is already handled with the class declaration

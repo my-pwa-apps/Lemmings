@@ -1,0 +1,310 @@
+/* Lemmings Game CSS */
+
+:root {
+    --bg-color: #222;
+    --primary-color: #4A90E2;
+    --header-bg: #333;
+    --button-color: #3E4EB8;
+    --button-hover: #3F51B5;
+    --button-disabled: #666;
+    --text-color: #fff;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+.game-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.game-header {
+    margin-bottom: 20px;
+    background-color: var(--header-bg);
+    padding: 15px;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.game-header h1 {
+    font-size: 24px;
+    text-align: center;
+    margin-bottom: 10px;
+    color: var(--primary-color);
+}
+
+.game-controls {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.lemming-count, .saved-count, .time {
+    flex: 1;
+    text-align: center;
+    padding: 5px;
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.ability-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 10px;
+    justify-content: center;
+}
+
+.ability-btn {
+    flex: 1;
+    min-width: 80px;
+    padding: 6px 10px;
+    background-color: var(--button-color);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.ability-btn:hover {
+    background-color: var(--button-hover);
+}
+
+.ability-btn.active {
+    background-color: var(--primary-color);
+    box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+}
+
+.ability-btn.disabled {
+    background-color: var(--button-disabled);
+    cursor: not-allowed;
+}
+
+.game-speed {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+#current-speed {
+    min-width: 30px;
+    text-align: center;
+}
+
+#canvas-container {
+    position: relative;
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+#game-canvas {
+    display: block;
+    width: 100%;
+    background-color: var(--bg-color);
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+/* Level select screen */
+.level-select {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    padding: 20px;
+    z-index: 10;
+}
+
+.level-select.active {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.level-select h2 {
+    font-size: 28px;
+    margin-bottom: 20px;
+    color: var(--primary-color);
+}
+
+.levels-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 15px;
+    width: 100%;
+    max-width: 800px;
+}
+
+.level-btn {
+    padding: 15px;
+    background-color: var(--button-color);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.level-btn:hover {
+    background-color: var(--button-hover);
+}
+
+#pause-btn {
+    padding: 6px 10px;
+    background-color: var(--button-color);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+#pause-btn:hover {
+    background-color: var(--button-hover);
+}
+
+#speed-decrease, #speed-increase, #help-btn, #sound-btn {
+    padding: 2px 6px;
+    background-color: var(--button-color);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+#speed-decrease:hover, #speed-increase:hover, #help-btn:hover, #sound-btn:hover {
+    background-color: var(--button-hover);
+}
+
+#sound-btn.muted {
+    color: var(--button-disabled);
+}
+
+/* Modal styles */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.active {
+    display: flex;
+}
+
+.modal-content {
+    background-color: var(--header-bg);
+    padding: 20px;
+    border-radius: 8px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-content h2 {
+    font-size: 24px;
+    margin-bottom: 15px;
+    color: var(--primary-color);
+}
+
+.modal-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.modal-buttons button {
+    padding: 10px 15px;
+    background-color: var(--button-color);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.modal-buttons button:hover {
+    background-color: var(--button-hover);
+}
+
+#close-help-btn {
+    padding: 8px 15px;
+    background-color: var(--button-color);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-top: 20px;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+#close-help-btn:hover {
+    background-color: var(--button-hover);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .game-header {
+        padding: 10px;
+    }
+    
+    .ability-btn {
+        min-width: 60px;
+        padding: 5px;
+        font-size: 14px;
+    }
+    
+    .game-controls {
+        flex-direction: column;
+    }
+    
+    .levels-container {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+}
+
+@media (max-width: 480px) {
+    .game-header h1 {
+        font-size: 20px;
+    }
+    
+    .ability-controls {
+        flex-direction: column;
+    }
+    
+    .levels-container {
+        grid-template-columns: 1fr;
+    }
+}

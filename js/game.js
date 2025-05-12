@@ -1,4 +1,5 @@
 import { LevelManager } from './levels.js';
+import { Assets } from './assets.js';
 
 /**
  * Main game class for the Lemmings game

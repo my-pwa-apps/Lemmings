@@ -360,15 +360,14 @@ export class Game {
     
     /**
      * Release a new lemming
-     */
-    releaseLemming() {
+     */    releaseLemming() {
         if (!this.terrain.entry || this.remainingLemmings <= 0) return;
         
         // Create new lemming at entry point
         const lemming = new Lemming(
             this,
             this.terrain.entry.x + 12,  // Center in entry
-            this.terrain.entry.y + 20   // Bottom of entry
+            this.terrain.entry.y + 5    // Near the top of entry to prevent excessive falling
         );
         
         this.lemmings.push(lemming);

@@ -252,13 +252,12 @@ export class Lemming {
         if (floorY !== null) {
             // Land on floor
             this.y = floorY - this.height + 1;
-            
-            // Play splat sound if falling from a great height and not a floater
-            if (this.fallDistance > 70 && !this.abilities.floater) {
+              // Play splat sound if falling from a great height and not a floater
+            if (this.fallDistance > 110 && !this.abilities.floater) {
                 this.game.sound.playSound('splat', 0.5);
                 
                 // Optional: kill lemming if falling from extreme height
-                if (this.fallDistance > 120 && !this.abilities.floater) {
+                if (this.fallDistance > 150 && !this.abilities.floater) {
                     this.active = false;
                     return;
                 }

@@ -121,9 +121,28 @@ export class LevelManager {
             },            buildFunction: (game) => {
                 const width = game.width;
                 const height = game.height;
-                  
-                // Base ground - making it more visible
-                game.terrain.addRect(0, height - 40, width, 40, 'dirt');
+                    // Base ground - making it more visible
+                game.terrain.addRect(0, height - 40, width, 40, 'dirt');                // Create an entry platform - much closer to the entry point
+                const entryX = width/4 - 50; // Position for entry platform
+                const entryY = height/3 + 20; // Height of the entry platform - moved up to be closer to entry
+                game.terrain.addRect(entryX, entryY, 100, 10, 'dirt'); // Platform under entry
+                
+                // Create a safe path down with a staircase/ramp
+                const stepCount = 5;
+                const stepWidth = 80;
+                const stepHeight = 10;
+                const totalHeight = height - 40 - entryY - 10;
+                const heightPerStep = totalHeight / stepCount;
+                
+                for (let i = 0; i < stepCount; i++) {
+                    game.terrain.addRect(
+                        entryX + 10, // Offset a bit from the platform edge
+                        entryY + 10 + (i * heightPerStep),
+                        stepWidth - (i * 10), // Each step gets narrower
+                        stepHeight,
+                        'dirt'
+                    );
+                }
                 
                 // Create a clearly defined gap in the middle - larger and more obvious
                 // Use rectangular gap instead of circular
@@ -144,10 +163,8 @@ export class LevelManager {
                     game.terrain.addRect(gapX - 30 - (i * 15), height - 60, 10, 5, 'rock');
                     // Right side arrows
                     game.terrain.addRect(gapX + gapWidth + 20 + (i * 15), height - 60, 10, 5, 'rock');
-                }
-                
-                // Entry point - moved to ensure lemmings spawn safely on solid ground
-                game.terrain.setEntry(width/4, 100); // Move further left from the gap
+                }                // Entry point - positioned directly above the entry platform
+                game.terrain.setEntry(width/4, entryY - 20); // Right above the platform with minimal falling distance
                 
                 // Exit point - positioned on the right side
                 game.terrain.setExit(width - 100, height - 64);

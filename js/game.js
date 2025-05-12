@@ -559,8 +559,5 @@ export class Game {
             if (this.currentLevel) {
                 this.currentLevel.build(this);
             }
-        }
-    }
+        }    }
 }
-
-// Export is already handled with the class declaration

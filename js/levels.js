@@ -73,6 +73,31 @@ export class LevelManager {
         
         this.createLevels();
     }
+      /**
+     * Get all levels
+     */
+    getAllLevels() {
+        return this.levels;
+    }
+    
+    /**
+     * Get current level
+     */
+    getCurrentLevel() {
+        return this.currentLevel;
+    }
+    
+    /**
+     * Load a specific level by ID
+     */
+    loadLevel(id) {
+        const level = this.levels.find(l => l.id === id);
+        if (!level) return false;
+        
+        this.currentLevel = level;
+        level.build(this.game);
+        return true;
+    }
     
     /**
      * Create all game levels
@@ -127,8 +152,5 @@ export class LevelManager {
                 // Exit point - positioned on the right side
                 game.terrain.setExit(width - 100, height - 64);
             }
-        }));
-    }
+        }));    }
 }
-
-// Export is already handled with the class declaration

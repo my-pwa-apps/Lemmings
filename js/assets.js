@@ -1,3 +1,5 @@
+import { COLORS } from './utils.js';
+
 /**
  * Assets generation for the Lemmings game
  * All visual elements are procedurally generated here instead of loading image files

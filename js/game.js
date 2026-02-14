@@ -1,6 +1,6 @@
 import { LevelManager } from './levels.js';
 import { Assets } from './assets.js';
-import { COLORS, formatTime } from './utils.js';
+import { COLORS, PHYSICS, formatTime } from './utils.js';
 import { Terrain } from './terrain.js';
 import { SoundManager } from './sound.js';
 import { Lemming } from './lemming.js';
@@ -8,32 +8,33 @@ import { Lemming } from './lemming.js';
 /**
  * Main game class for the Lemmings game
  */
-
 export class Game {
     constructor(canvasId) {
-        // Get canvas and context
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
-        
-        // Set canvas size
-        this.resize();
-        
+
+        // Fixed internal resolution (original Lemmings was 320×160, we use 2×)
+        this.width = 960;
+        this.height = 540;
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+
         // Game state
-        this.width = this.canvas.width;
-        this.height = this.canvas.height;
         this.gameSpeed = 1;
         this.isPaused = false;
         this.debugMode = false;
-        
+        this.isLevelActive = false;
+        this._levelEnded = false; // guard against double endLevel
+
         // Time tracking
         this.lastTime = 0;
         this.timeRemaining = 0;
-        
-        // Mouse tracking
+
+        // Mouse (in canvas-space)
         this.mouseX = 0;
         this.mouseY = 0;
         this.selectedAbility = null;
-        
+
         // Lemming management
         this.lemmings = [];
         this.lemmingCount = 0;
@@ -43,525 +44,411 @@ export class Game {
         this.releaseRate = 1;
         this.releaseTimer = 0;
         this.remainingLemmings = 0;
-        
+
         // Level management
         this.currentLevel = null;
-        this.isLevelActive = false;
-          // Game components
+
+        // Components (initialised in init)
         this.assets = null;
         this.terrain = null;
         this.levelManager = null;
         this.sound = null;
-        
-        // Initialize game
+
         this.init();
     }
-      /**
-     * Initialize game components
-     */
+
+    /* ── Initialisation ───────────────────────────────────── */
+
     init() {
-        // Create assets manager (procedural graphics)
         this.assets = new Assets(this);
-        
-        // Create terrain manager
         this.terrain = new Terrain(this, this.width, this.height);
-        
-        // Create level manager
         this.levelManager = new LevelManager(this);
-        
-        // Create sound manager
         this.sound = new SoundManager();
-        
-        // Set up event listeners
         this.setupEventListeners();
-        
-        // Show level selection
         this.showLevelSelection();
+
+        // Start the render/game loop once
+        this.lastTime = performance.now();
+        requestAnimationFrame((ts) => this.gameLoop(ts));
     }
-      /**
-     * Set up event listeners
-     */
+
+    /* ── Event listeners ──────────────────────────────────── */
+
     setupEventListeners() {
-        // Canvas mouse events
-        this.canvas.addEventListener('mousemove', (e) => {
+        // ─ Mouse → canvas-space conversion ─
+        const toCanvas = (e) => {
             const rect = this.canvas.getBoundingClientRect();
-            this.mouseX = e.clientX - rect.left;
-            this.mouseY = e.clientY - rect.top;
+            return {
+                x: (e.clientX - rect.left) * (this.canvas.width / rect.width),
+                y: (e.clientY - rect.top) * (this.canvas.height / rect.height)
+            };
+        };
+
+        this.canvas.addEventListener('mousemove', (e) => {
+            const p = toCanvas(e);
+            this.mouseX = p.x;
+            this.mouseY = p.y;
         });
-        
+
         this.canvas.addEventListener('click', (e) => {
             if (!this.isLevelActive || this.isPaused) return;
-            
-            const rect = this.canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            
-            this.handleCanvasClick(x, y);
+            const p = toCanvas(e);
+            this.handleCanvasClick(p.x, p.y);
         });
-        
+
         // Ability buttons
-        const abilityButtons = document.querySelectorAll('.ability-btn');
-        abilityButtons.forEach(button => {
-            button.addEventListener('click', () => {
-                const ability = button.id.replace('ability-', '');
-                this.selectAbility(ability);
+        document.querySelectorAll('.ability-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.selectAbility(btn.id.replace('ability-', ''));
             });
         });
-        
-        // Game speed controls
+
+        // Speed controls
         document.getElementById('speed-decrease').addEventListener('click', () => {
             this.gameSpeed = Math.max(0.5, this.gameSpeed - 0.5);
             document.getElementById('current-speed').textContent = this.gameSpeed + 'x';
         });
-        
         document.getElementById('speed-increase').addEventListener('click', () => {
             this.gameSpeed = Math.min(3, this.gameSpeed + 0.5);
             document.getElementById('current-speed').textContent = this.gameSpeed + 'x';
         });
-        
-        // Pause button
+
+        // Pause
         document.getElementById('pause-btn').addEventListener('click', () => {
-            this.isPaused = !this.isPaused;
-            document.getElementById('pause-btn').textContent = this.isPaused ? 'Resume' : 'Pause';
+            this.togglePause();
         });
-        
-        // Help button
-        document.getElementById('help-btn').addEventListener('click', () => {
-            document.getElementById('help-modal').classList.add('active');
-            this.isPaused = true;
-            document.getElementById('pause-btn').textContent = 'Resume';
-        });
-        
-        // Close help button
-        document.getElementById('close-help-btn').addEventListener('click', () => {
-            document.getElementById('help-modal').classList.remove('active');
-        });
-        
-        // Level complete modal buttons
+
+        // Level-complete modal buttons
         document.getElementById('next-level-btn').addEventListener('click', () => {
             document.getElementById('level-complete').classList.remove('active');
-            // Start the next level
-            const nextLevelId = this.currentLevel.id + 1;
-            this.startLevel(nextLevelId);
+            this.startLevel(this.currentLevel.id + 1);
         });
-        
         document.getElementById('retry-level-btn').addEventListener('click', () => {
             document.getElementById('level-complete').classList.remove('active');
-            // Retry the same level
             this.startLevel(this.currentLevel.id);
         });
-        
         document.getElementById('level-select-btn').addEventListener('click', () => {
             document.getElementById('level-complete').classList.remove('active');
             this.showLevelSelection();
         });
-        
-        // Window resize
-        window.addEventListener('resize', () => {
-            this.resize();
-        });
+
+        // Nuke button
+        const nukeBtn = document.getElementById('nuke-btn');
+        if (nukeBtn) {
+            nukeBtn.addEventListener('click', () => {
+                if (!this.isLevelActive) return;
+                if (confirm('Nuke all lemmings?')) {
+                    this.lemmings.forEach(l => {
+                        if (l.active && l.state !== 'exploding' && l.state !== 'splatting' && l.state !== 'exiting') {
+                            l.isBomber = true;
+                            l.bomberCountdown = Math.random() * 2; // stagger
+                        }
+                    });
+                }
+            });
+        }
+
+        // Resize
+        window.addEventListener('resize', () => this.onResize());
     }
-    
-    /**
-     * Handle canvas click
-     */
+
+    togglePause() {
+        this.isPaused = !this.isPaused;
+        document.getElementById('pause-btn').textContent = this.isPaused ? 'Resume' : 'Pause';
+    }
+
+    /* ── Canvas click ─────────────────────────────────────── */
+
     handleCanvasClick(x, y) {
         if (!this.selectedAbility) return;
-        
-        // Find if a lemming was clicked
-        const clickedLemming = this.lemmings.find(lemming => {
-            if (!lemming.active) return false;
-            
-            return x >= lemming.x && 
-                   x <= lemming.x + lemming.width &&
-                   y >= lemming.y && 
-                   y <= lemming.y + lemming.height;
+
+        // Find closest lemming under cursor
+        const clicked = this.lemmings.find(l => {
+            if (!l.active) return false;
+            return x >= l.x && x <= l.x + l.width &&
+                   y >= l.y && y <= l.y + l.height;
         });
-        
-        if (clickedLemming) {
-            // Apply selected ability
+
+        if (clicked) {
             const abilities = this.currentLevel.abilities;
-            
             if (abilities[this.selectedAbility] > 0) {
-                if (clickedLemming.grantAbility(this.selectedAbility)) {
+                if (clicked.grantAbility(this.selectedAbility)) {
                     abilities[this.selectedAbility]--;
+                    this.sound.playSound('pop', 0.3);
                     this.updateAbilityUI();
                 }
             }
         }
     }
-    
-    /**
-     * Select an ability
-     */    selectAbility(ability) {
-        // Deselect all buttons first
-        const abilityButtons = document.querySelectorAll('.ability-btn');
-        abilityButtons.forEach(button => {
-            button.classList.remove('active');
-        });
-        
-        // Select the new ability if it's different
+
+    /* ── Ability selection ─────────────────────────────────── */
+
+    selectAbility(ability) {
+        document.querySelectorAll('.ability-btn').forEach(b => b.classList.remove('active'));
         if (this.selectedAbility !== ability) {
             this.selectedAbility = ability;
             document.getElementById('ability-' + ability).classList.add('active');
-            
-            // Play selection sound
-            this.sound.playSound('pop', 0.3);
+            this.sound.playSound('pop', 0.2);
         } else {
-            // Clicking the same button deselects it
             this.selectedAbility = null;
         }
     }
-    
-    /**
-     * Show level selection screen
-     */
+
+    /* ── Level selection ──────────────────────────────────── */
+
     showLevelSelection() {
-        // Reset game state
         this.isLevelActive = false;
         this.lemmings = [];
-        
-        // Show level selection UI
+        this.sound.stopBackgroundMusic();
+
         const levelSelect = document.getElementById('level-select');
         levelSelect.classList.add('active');
-        
-        // Clear previous level buttons
-        const levelsContainer = document.querySelector('.levels-container');
-        levelsContainer.innerHTML = '';
-        
-        // Add level buttons
+
+        const container = document.querySelector('.levels-container');
+        container.innerHTML = '';
+
         this.levelManager.getAllLevels().forEach(level => {
-            const levelButton = document.createElement('button');
-            levelButton.classList.add('level-btn');
-            levelButton.textContent = `Level ${level.id}: ${level.name}`;
-            levelButton.addEventListener('click', () => {
+            const btn = document.createElement('button');
+            btn.classList.add('level-btn');
+            btn.innerHTML = `<strong>Level ${level.id}</strong><br><span style="font-size:0.85em">${level.name}</span>`;
+            btn.addEventListener('click', () => {
                 this.startLevel(level.id);
                 levelSelect.classList.remove('active');
             });
-            levelsContainer.appendChild(levelButton);
+            container.appendChild(btn);
         });
     }
-    
-    /**
-     * Start a specific level
-     */
+
+    /* ── Start level ──────────────────────────────────────── */
+
     startLevel(levelId) {
-        // Load the level
         if (!this.levelManager.loadLevel(levelId)) return;
-        
-        // Get level data
+
         this.currentLevel = this.levelManager.getCurrentLevel();
-        
-        // Set up level parameters
         this.lemmingTotal = this.currentLevel.lemmingCount;
         this.remainingLemmings = this.lemmingTotal;
         this.releaseRate = this.currentLevel.releaseRate;
         this.timeRemaining = this.currentLevel.timeLimit;
         this.requiredSaveCount = this.currentLevel.requiredSaveCount;
-        
-        // Reset counters
+
         this.lemmingCount = 0;
         this.savedCount = 0;
         this.releaseTimer = 0;
-        
-        // Clear lemmings array
         this.lemmings = [];
-        
-        // Update UI
+        this._levelEnded = false;
+
         this.updateCountsUI();
         this.updateAbilityUI();
-        
-        // Start level
+
         this.isLevelActive = true;
         this.isPaused = false;
         document.getElementById('pause-btn').textContent = 'Pause';
-        
-        // Start game loop if not already running
-        if (!this.lastTime) {
-            this.lastTime = performance.now();
-            requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
-        }
-        
-        // Play background music for the gameplay
+
         this.sound.playBackgroundMusic('gameplay', true);
-        
-        console.log(`Starting level ${levelId}: ${this.currentLevel.name}`);
     }
-    
-    /**
-     * Main game loop
-     */
+
+    /* ── Game loop ────────────────────────────────────────── */
+
     gameLoop(timestamp) {
-        // Calculate delta time
-        const deltaTime = timestamp - this.lastTime;
+        const deltaTime = Math.min(timestamp - this.lastTime, 50); // cap at 50ms
         this.lastTime = timestamp;
-        
-        // Update and render
-        this.update(deltaTime);
+
+        if (this.isLevelActive && !this.isPaused) {
+            this.update(deltaTime);
+        }
         this.render();
-        
-        // Continue loop
-        requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+
+        requestAnimationFrame((ts) => this.gameLoop(ts));
     }
-    
-    /**
-     * Update game state
-     */
+
+    /* ── Update ───────────────────────────────────────────── */
+
     update(deltaTime) {
-        if (!this.isLevelActive || this.isPaused) return;
-        
-        // Update time remaining
+        // Time
         this.timeRemaining -= (deltaTime / 1000) * this.gameSpeed;
         if (this.timeRemaining <= 0) {
             this.timeRemaining = 0;
-            this.endLevel(false);
+            this.endLevel(this.savedCount >= this.requiredSaveCount);
+            return;
         }
-        
-        // Update lemming release
+
+        // Release lemmings
         this.updateLemmingRelease(deltaTime);
-        
-        // Update all lemmings
-        this.lemmings.forEach(lemming => {
+
+        // Update lemmings
+        for (const lemming of this.lemmings) {
             lemming.update(deltaTime);
-        });
-        
-        // Handle blocker collisions
-        this.handleBlockerCollisions();
-        
-        // Update UI
-        this.updateCountsUI();
-        
-        // Check win condition
-        if (this.savedCount >= this.requiredSaveCount) {
-            this.endLevel(true);
         }
-        
-        // Check if all lemmings are gone and none can be saved
+
+        // Blocker collisions
+        this.handleBlockerCollisions();
+
+        // UI
+        this.updateCountsUI();
+
+        // Check end conditions: all lemmings accounted for
         const activeLemmings = this.lemmings.filter(l => l.active).length;
         if (activeLemmings === 0 && this.remainingLemmings === 0) {
-            // No more lemmings to release and none active
-            if (this.savedCount < this.requiredSaveCount) {
-                this.endLevel(false);
-            }
+            this.endLevel(this.savedCount >= this.requiredSaveCount);
         }
     }
-    
-    /**
-     * Update lemming release
-     */
+
     updateLemmingRelease(deltaTime) {
         if (this.remainingLemmings <= 0) return;
-        
-        // Increment release timer
         this.releaseTimer += (deltaTime / 1000) * this.gameSpeed;
-        
-        // Check if it's time to release a lemming
-        const releaseInterval = 1 / this.releaseRate;
-        if (this.releaseTimer >= releaseInterval) {
-            this.releaseTimer = 0;
+        const interval = 1 / this.releaseRate;
+        if (this.releaseTimer >= interval) {
+            this.releaseTimer -= interval;
             this.releaseLemming();
         }
     }
-    
-    /**
-     * Release a new lemming
-     */    releaseLemming() {
+
+    releaseLemming() {
         if (!this.terrain.entry || this.remainingLemmings <= 0) return;
-        
-        // Create new lemming at entry point
         const lemming = new Lemming(
             this,
-            this.terrain.entry.x + 12,  // Center in entry
-            this.terrain.entry.y + 5    // Near the top of entry to prevent excessive falling
+            this.terrain.entry.x + 8,
+            this.terrain.entry.y + 16
         );
-        
         this.lemmings.push(lemming);
         this.lemmingCount++;
         this.remainingLemmings--;
     }
-    
-    /**
-     * Handle blocker collisions with other lemmings
-     */
+
     handleBlockerCollisions() {
-        // Find all active blockers
-        const blockers = this.lemmings.filter(l => 
-            l.active && l.state === 'blocking'
-        );
-        
+        const blockers = this.lemmings.filter(l => l.active && l.state === 'blocking');
         if (blockers.length === 0) return;
-        
-        // Check collisions with other lemmings
-        this.lemmings.forEach(lemming => {
-            if (!lemming.active || lemming.state === 'blocking') return;
-            
-            // Check collision with each blocker
+        for (const lemming of this.lemmings) {
+            if (!lemming.active || lemming.state === 'blocking') continue;
             for (const blocker of blockers) {
                 if (lemming.checkCollisionWithLemming(blocker)) {
-                    // Turn around
                     lemming.direction *= -1;
                     break;
                 }
             }
-        });
+        }
     }
-    
-    /**
-     * Called when a lemming is saved
-     */
+
     lemmingSaved() {
         this.savedCount++;
     }
-      /**
-     * End the current level
-     */
+
+    /* ── End level ────────────────────────────────────────── */
+
     endLevel(isWin) {
+        if (this._levelEnded) return; // prevent double-fire
+        this._levelEnded = true;
         this.isLevelActive = false;
-        
-        // Update level result modal
-        document.getElementById('level-result-title').textContent = 
+
+        // Play result sound
+        this.sound.stopBackgroundMusic();
+        this.sound.playSound(isWin ? 'success' : 'fail', 0.6);
+
+        // Update modal
+        document.getElementById('level-result-title').textContent =
             isWin ? 'Level Complete!' : 'Level Failed';
-        
-        document.getElementById('saved-lemmings').textContent = this.savedCount;
-        document.getElementById('total-lemmings').textContent = this.lemmingTotal;
-        
-        const resultMessage = isWin
-            ? `You saved ${this.savedCount} out of ${this.lemmingTotal} lemmings.`
-            : `You saved ${this.savedCount} out of ${this.lemmingTotal} lemmings. Required: ${this.requiredSaveCount}`;
-        
-        document.getElementById('level-result-message').textContent = resultMessage;
-        
-        // Show/hide next level button based on whether there is a next level
-        const currentLevelId = this.currentLevel.id;
-        const hasNextLevel = this.levelManager.levels.some(l => l.id === currentLevelId + 1);
-        
-        document.getElementById('next-level-btn').style.display = 
-            (isWin && hasNextLevel) ? 'block' : 'none';
-        
-        // Show the modal
+
+        const msg = isWin
+            ? `You saved ${this.savedCount} out of ${this.lemmingTotal} lemmings!`
+            : `You saved ${this.savedCount}/${this.lemmingTotal}. Needed: ${this.requiredSaveCount}.`;
+        document.getElementById('level-result-message').textContent = msg;
+
+        // Next level button visibility
+        const hasNext = this.levelManager.levels.some(l => l.id === this.currentLevel.id + 1);
+        document.getElementById('next-level-btn').style.display =
+            (isWin && hasNext) ? 'inline-block' : 'none';
+
         document.getElementById('level-complete').classList.add('active');
     }
-    
-    /**
-     * Update UI counters
-     */
+
+    /* ── UI updates ───────────────────────────────────────── */
+
     updateCountsUI() {
         document.getElementById('lemming-count').textContent = this.lemmingCount;
         document.getElementById('lemming-total').textContent = this.lemmingTotal;
         document.getElementById('saved-count').textContent = this.savedCount;
         document.getElementById('time-remaining').textContent = formatTime(Math.max(0, this.timeRemaining));
     }
-    
-    /**
-     * Update ability UI
-     */
+
     updateAbilityUI() {
         if (!this.currentLevel) return;
-        
         const abilities = this.currentLevel.abilities;
-        
-        // Update each ability button
-        Object.keys(abilities).forEach(ability => {
-            const button = document.getElementById('ability-' + ability);
-            if (button) {
-                // Update count indicator
-                button.textContent = ability.charAt(0).toUpperCase() + ability.slice(1) + ` (${abilities[ability]})`;
-                
-                // Disable if no abilities left
-                if (abilities[ability] <= 0) {
-                    button.classList.add('disabled');
-                    if (this.selectedAbility === ability) {
-                        this.selectedAbility = null;
-                    }
-                    button.classList.remove('active');
-                } else {
-                    button.classList.remove('disabled');
-                }
+        for (const ability of Object.keys(abilities)) {
+            const btn = document.getElementById('ability-' + ability);
+            if (!btn) continue;
+            const count = abilities[ability];
+            btn.textContent = ability.charAt(0).toUpperCase() + ability.slice(1) + ` (${count})`;
+            if (count <= 0) {
+                btn.classList.add('disabled');
+                if (this.selectedAbility === ability) { this.selectedAbility = null; }
+                btn.classList.remove('active');
+            } else {
+                btn.classList.remove('disabled');
             }
-        });
-    }
-    /**
-     * Render game
-     */    render() {
-        // Clear canvas with solid color (fallback)
-        this.ctx.fillStyle = COLORS.BACKGROUND;
-        this.ctx.fillRect(0, 0, this.width, this.height);
-          // Normal terrain rendering
-        this.terrain.render(this.ctx);
-        
-        // If in debug mode, show collision map overlay
-        if (this.debugMode) {
-            this.terrain.debugRender(this.ctx);
-            
-            // Draw text to show how to use builder
-            this.ctx.fillStyle = '#FFFFFF';
-            this.ctx.font = 'bold 16px Arial';
-            this.ctx.fillText('Press D to toggle debug view', 10, 100);
-            this.ctx.fillText('Build a bridge across the gap!', 10, 120);
-            this.ctx.fillText('1. Select Builder ability (5)', 10, 150);
-            this.ctx.fillText('2. Click on a lemming at the edge', 10, 170);
         }
-        
-        // Render lemmings
-        this.lemmings.forEach(lemming => {
-            lemming.render(this.ctx);
-            
-            // Debug: show lemming collision boxes
+    }
+
+    /* ── Render ────────────────────────────────────────────── */
+
+    render() {
+        const ctx = this.ctx;
+        const w = this.width;
+        const h = this.height;
+
+        // Background gradient (classic dark-blue sky)
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, COLORS.BACKGROUND_GRADIENT.TOP);
+        grad.addColorStop(1, COLORS.BACKGROUND_GRADIENT.BOTTOM);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        // Terrain
+        this.terrain.render(ctx);
+
+        // Debug overlay
+        if (this.debugMode) {
+            this.terrain.debugRender(ctx);
+        }
+
+        // Lemmings
+        for (const lemming of this.lemmings) {
+            lemming.render(ctx);
             if (this.debugMode) {
-                this.ctx.strokeStyle = '#00FF00';
-                this.ctx.lineWidth = 1;
-                this.ctx.strokeRect(lemming.x, lemming.y, lemming.width, lemming.height);
+                ctx.strokeStyle = '#00FF00';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(lemming.x, lemming.y, lemming.width, lemming.height);
             }
-        });
-        
-        // Render cursor for selected ability
-        if (this.selectedAbility && this.isLevelActive && !this.isPaused) {
-            this.ctx.strokeStyle = '#FFFFFF';
-            this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-            this.ctx.arc(this.mouseX, this.mouseY, 12, 0, Math.PI * 2);
-            this.ctx.stroke();
-            
-            this.ctx.fillStyle = '#FFFFFF';
-            this.ctx.font = '12px Arial';
-            this.ctx.fillText(this.selectedAbility, this.mouseX + 15, this.mouseY - 5);
         }
-        
-        // Debug information
+
+        // Selection cursor
+        if (this.selectedAbility && this.isLevelActive && !this.isPaused) {
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(this.mouseX, this.mouseY, 14, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '11px monospace';
+            ctx.fillText(this.selectedAbility, this.mouseX + 16, this.mouseY - 4);
+        }
+
+        // Debug HUD
         if (this.debugMode) {
-            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            this.ctx.fillRect(10, 10, 200, 60);
-            
-            this.ctx.fillStyle = '#FFFFFF';
-            this.ctx.font = '12px Arial';
-            this.ctx.fillText(`Active lemmings: ${this.lemmings.filter(l => l.active).length}`, 15, 25);
-            this.ctx.fillText(`FPS: ${Math.round(1000 / (performance.now() - this.lastTime))}`, 15, 40);
-            this.ctx.fillText(`Mouse: ${Math.round(this.mouseX)}, ${Math.round(this.mouseY)}`, 15, 55);
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(8, 8, 180, 50);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '11px monospace';
+            ctx.fillText(`Active: ${this.lemmings.filter(l => l.active).length}`, 14, 22);
+            ctx.fillText(`Mouse: ${Math.round(this.mouseX)}, ${Math.round(this.mouseY)}`, 14, 36);
+            ctx.fillText(`Speed: ${this.gameSpeed}x`, 14, 50);
         }
     }
-    
-    /**
-     * Resize canvas
-     */
-    resize() {
-        // Get container size
-        const container = this.canvas.parentElement;
-        const width = container.clientWidth;
-        
-        // Set canvas size (maintaining 16:9 aspect ratio)
-        this.canvas.width = width;
-        this.canvas.height = Math.floor(width * (9/16));
-        
-        // Update game dimensions
-        if (this.terrain) {
-            // Re-create terrain with new size
-            this.width = this.canvas.width;
-            this.height = this.canvas.height;
-            this.terrain = new Terrain(this, this.width, this.height);
-            
-            // Rebuild current level if active
-            if (this.currentLevel) {
-                this.currentLevel.build(this);
-            }
-        }    }
+
+    /* ── Resize (CSS only — internal resolution stays fixed) ── */
+
+    onResize() {
+        // Canvas resolution stays constant; CSS handles scaling.
+        // Nothing to do here since we use `width: 100%` in CSS.
+    }
 }

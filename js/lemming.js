@@ -1,582 +1,463 @@
 /**
  * Lemming entity class
  * Handles individual lemming behavior, states and rendering
+ * Gameplay mechanics follow the original Amiga Lemmings rules
  */
-import { rectsOverlap } from './utils.js';
+import { PHYSICS, rectsOverlap } from './utils.js';
 
 export class Lemming {
     constructor(game, x, y) {
         this.game = game;
         this.x = x;
         this.y = y;
-        this.width = 8 * 2;  // Scaled width
-        this.height = 10 * 2; // Scaled height
-        
+        this.width = 16;   // 8 × 2 (sprite is 8px, drawn at 2× scale)
+        this.height = 20;  // 10 × 2
+
         // Movement
-        this.direction = 1;  // 1 = right, -1 = left
+        this.direction = 1;  // 1 = right, −1 = left
         this.fallSpeed = 0;
-        this.walkSpeed = 1;
+        this.walkSpeed = PHYSICS.WALK_SPEED;
         this.fallStartY = y;
         this.fallDistance = 0;
-        
-        // State management
+
+        // State machine
         this.state = 'falling';
-        this.nextState = null;
         this.stateTime = 0;
         this.animFrame = 0;
-        
-        // Special abilities
-        this.abilities = {
-            climber: false,
-            floater: false,
-            bomber: false,
-            blocker: false,
-            builder: false,
-            basher: false,
-            miner: false,
-            digger: false
-        };
-        
-        // Building properties
-        this.bridgeSegmentsLeft = 0;
-        
-        // Bomber properties
-        this.countdownTimer = 0;
-        
+        this._lastActionFrame = -1; // prevents action firing twice on same frame
+
+        // Persistent abilities (survive state changes)
+        this.canClimb = false;
+        this.canFloat = false;
+
+        // Builder
+        this.bridgeStepsLeft = 0;
+
+        // Bomber
+        this.bomberCountdown = 0;
+        this.isBomber = false;
+
         // Status
         this.active = true;
         this.saved = false;
     }
-    
-    /**
-     * Reset lemming to initial state
-     */
-    reset(x, y) {
-        this.x = x;
-        this.y = y;
-        this.direction = 1;
-        this.fallSpeed = 0;
-        this.setState('falling');
-        
-        // Reset abilities
-        Object.keys(this.abilities).forEach(ability => {
-            this.abilities[ability] = false;
-        });
-        
-        this.bridgeSegmentsLeft = 0;
-        this.countdownTimer = 0;
-        
-        this.active = true;
-        this.saved = false;
-    }
-    
-    /**
-     * Set lemming state
-     */
-    setState(state, immediate = false) {
-        if (immediate || this.state === 'falling' || state === 'exploding') {
-            this.state = state;
-            this.stateTime = 0;
-            this.animFrame = 0;
-            this.nextState = null;
-            
-            // Handle state-specific initialization
-            if (state === 'building') {
-                this.bridgeSegmentsLeft = 12; // Number of bridge segments to build
-            } else if (state === 'exploding') {
-                this.countdownTimer = 5; // 5-second countdown
-            }
-        } else {
-            // Queue state change after current action completes
-            this.nextState = state;
+
+    /* ── State management ─────────────────────────────────── */
+
+    setState(newState) {
+        if (this.state === newState) return;
+        this.state = newState;
+        this.stateTime = 0;
+        this.animFrame = 0;
+        this._lastActionFrame = -1;
+
+        if (newState === 'building') {
+            this.bridgeStepsLeft = PHYSICS.BUILDER_STEPS;
         }
     }
-    
-    /**
-     * Grant an ability to this lemming
-     */
+
+    /* ── Ability assignment ────────────────────────────────── */
+
     grantAbility(ability) {
-        if (this.abilities.hasOwnProperty(ability)) {
-            // Handle special ability cases
-            if (ability === 'bomber') {
-                this.setState('exploding', true);
-            } else {
-                this.abilities[ability] = true;
-                
-                // Immediately apply certain abilities
-                if (ability === 'digger' && this.state === 'walking') {
-                    this.setState('digging', true);
-                } else if (ability === 'basher' && this.state === 'walking') {
-                    this.setState('bashing', true);
-                } else if (ability === 'miner' && this.state === 'walking') {
-                    this.setState('mining', true);
-                } else if (ability === 'builder' && this.state === 'walking') {
-                    this.setState('building', true);
-                } else if (ability === 'blocker' && this.state === 'walking') {
-                    this.setState('blocking', true);
-                }
-            }
-            return true;
+        switch (ability) {
+            case 'climber':
+                if (this.canClimb) return false; // already has it
+                this.canClimb = true;
+                return true;
+            case 'floater':
+                if (this.canFloat) return false;
+                this.canFloat = true;
+                return true;
+            case 'bomber':
+                if (this.isBomber) return false;
+                this.isBomber = true;
+                this.bomberCountdown = PHYSICS.BOMBER_COUNTDOWN;
+                return true;
+            case 'blocker':
+                if (this.state === 'walking') { this.setState('blocking'); return true; }
+                return false;
+            case 'digger':
+                if (this.state === 'walking') { this.setState('digging'); return true; }
+                return false;
+            case 'basher':
+                if (this.state === 'walking') { this.setState('bashing'); return true; }
+                return false;
+            case 'miner':
+                if (this.state === 'walking') { this.setState('mining'); return true; }
+                return false;
+            case 'builder':
+                if (this.state === 'walking') { this.setState('building'); return true; }
+                return false;
+            default:
+                return false;
         }
-        return false;
     }
-    
-    /**
-     * Update lemming logic
-     */
+
+    /* ── Main update ──────────────────────────────────────── */
+
     update(deltaTime) {
         if (!this.active) return;
-        
+
+        // Advance state timer & animation
         this.stateTime += deltaTime;
-        
-        // Update animation frame
         const animData = this.game.assets.animations[this.state];
         if (animData) {
-            const frameDuration = animData.frameDuration / this.game.gameSpeed;
-            this.animFrame = Math.floor(this.stateTime / frameDuration) % animData.frameCount;
+            const dur = animData.frameDuration / this.game.gameSpeed;
+            this.animFrame = Math.floor(this.stateTime / dur) % animData.frameCount;
         }
-        
-        // Handle specific state behaviors
-        switch(this.state) {
-            case 'walking':
-                this.updateWalking();
-                break;
-                
-            case 'falling':
-                this.updateFalling();
-                break;
-                
-            case 'climbing':
-                this.updateClimbing();
-                break;
-                
-            case 'digging':
-                this.updateDigging();
-                break;
-                
-            case 'building':
-                this.updateBuilding();
-                break;
-                
-            case 'blocking':
-                this.updateBlocking();
-                break;
-                
-            case 'bashing':
-                this.updateBashing();
-                break;
-                
-            case 'mining':
-                this.updateMining();
-                break;
-                
-            case 'floating':
-                this.updateFloating();
-                break;
-                
-            case 'exploding':
-                this.updateExploding(deltaTime);
-                break;
-                
-            case 'exiting':
-                this.updateExiting();
-                break;
+
+        // Bomber countdown (ticks in every state except exiting/exploding)
+        if (this.isBomber && this.state !== 'exploding' && this.state !== 'splatting' && this.state !== 'exiting') {
+            this.bomberCountdown -= (deltaTime / 1000) * this.game.gameSpeed;
+            if (this.bomberCountdown <= 0) {
+                this.setState('exploding');
+            }
         }
-        
-        // Check if reached the exit
-        if (this.state !== 'exiting' && this.game.terrain.checkExit(this.x + this.width/2, this.y + this.height/2)) {
-            this.setState('exiting', true);
+
+        // State behavior
+        switch (this.state) {
+            case 'walking':   this.updateWalking(); break;
+            case 'falling':   this.updateFalling(); break;
+            case 'climbing':  this.updateClimbing(); break;
+            case 'floating':  this.updateFloating(); break;
+            case 'digging':   this.updateDigging(); break;
+            case 'building':  this.updateBuilding(); break;
+            case 'blocking':  break; // static — collisions handled by Game
+            case 'bashing':   this.updateBashing(); break;
+            case 'mining':    this.updateMining(); break;
+            case 'exploding': this.updateExploding(deltaTime); break;
+            case 'splatting': this.updateSplatting(); break;
+            case 'exiting':   this.updateExiting(); break;
+        }
+
+        // Check exit (unless already exiting or dead)
+        if (this.state !== 'exiting' && this.state !== 'exploding' && this.state !== 'splatting') {
+            if (this.game.terrain.checkExit(this.x + this.width / 2, this.y + this.height / 2)) {
+                this.setState('exiting');
+            }
+        }
+
+        // Off-screen death
+        if (this.y > this.game.height + 20) {
+            this.active = false;
         }
     }
-    
-    /**
-     * Update walking behavior
-     */
+
+    /* ── Walking ──────────────────────────────────────────── */
+
     updateWalking() {
-        // Move in current direction
-        this.x += this.direction * this.walkSpeed * this.game.gameSpeed;
-        
-        // Check if walking into a wall
-        if (this.game.terrain.checkCollision(
-                this.x + (this.direction > 0 ? this.width : 0), 
-                this.y + this.height/2)) {
-            
-            // Try climbing if can climb
-            if (this.abilities.climber) {
-                this.setState('climbing', true);
-            } else {
-                // Turn around
-                this.direction *= -1;
+        const speed = this.walkSpeed * this.game.gameSpeed;
+        this.x += this.direction * speed;
+
+        const terrain = this.game.terrain;
+        const frontX = this.x + (this.direction > 0 ? this.width : 0);
+
+        // Wall check at mid-body height
+        if (terrain.checkCollision(frontX, this.y + this.height * 0.4)) {
+            // Try stepping up (original game lets walkers climb small steps)
+            let stepped = false;
+            for (let dy = 1; dy <= PHYSICS.STEP_UP_HEIGHT; dy++) {
+                if (!terrain.checkCollision(frontX, this.y + this.height * 0.4 - dy)) {
+                    this.y -= dy;
+                    stepped = true;
+                    break;
+                }
             }
-            return;
+            if (!stepped) {
+                if (this.canClimb) {
+                    this.setState('climbing');
+                } else {
+                    this.direction *= -1;
+                }
+                return;
+            }
         }
-        
-        // Check for floor
-        const floorY = this.game.terrain.findFloorBelow(this.x + this.width/2, this.y + this.height, 5);
+
+        // Floor check
+        const floorY = terrain.findFloorBelow(this.x + this.width / 2, this.y + this.height, PHYSICS.FLOOR_SEARCH_DISTANCE);
         if (floorY === null) {
-            // No floor below, start falling
-            this.setState('falling', true);
+            this.fallStartY = this.y;
+            this.fallSpeed = 0;
+            this.setState('falling');
         } else {
-            // Stay on floor
             this.y = floorY - this.height + 1;
         }
     }
-    
-    /**
-     * Update falling behavior
-     */    updateFalling() {
-        // Track fall distance
-        if (this.fallSpeed === 0) {
-            // Just started falling, record starting position
-            this.fallStartY = this.y;
-        }
-        
-        // Increase fall speed (gravity)
-        this.fallSpeed = Math.min(5, this.fallSpeed + 0.1 * this.game.gameSpeed);
-        
-        // Limit fall speed if floater ability is active
-        if (this.abilities.floater && this.fallSpeed > 1) {
-            this.fallSpeed = 1;
+
+    /* ── Falling ──────────────────────────────────────────── */
+
+    updateFalling() {
+        // Gravity
+        this.fallSpeed = Math.min(PHYSICS.MAX_FALL_SPEED, this.fallSpeed + PHYSICS.GRAVITY * this.game.gameSpeed);
+
+        // Engage floater if available
+        if (this.canFloat && this.fallSpeed > PHYSICS.FLOAT_SPEED) {
+            this.fallSpeed = PHYSICS.FLOAT_SPEED;
             this.setState('floating');
             return;
         }
-        
-        // Move down
+
         this.y += this.fallSpeed * this.game.gameSpeed;
-        
-        // Calculate current fall distance
         this.fallDistance = this.y - this.fallStartY;
-        
-        // Check for landing
-        const floorY = this.game.terrain.findFloorBelow(this.x + this.width/2, this.y + this.height, 2);
+
+        // Landing check
+        const floorY = this.game.terrain.findFloorBelow(this.x + this.width / 2, this.y + this.height, 3);
         if (floorY !== null) {
-            // Land on floor
             this.y = floorY - this.height + 1;
-              // Play splat sound if falling from a great height and not a floater
-            if (this.fallDistance > 110 && !this.abilities.floater) {
+
+            if (this.fallDistance > PHYSICS.FALL_DEATH_DISTANCE && !this.canFloat) {
                 this.game.sound.playSound('splat', 0.5);
-                
-                // Optional: kill lemming if falling from extreme height
-                if (this.fallDistance > 150 && !this.abilities.floater) {
-                    this.active = false;
-                    return;
-                }
+                this.setState('splatting');
+            } else {
+                this.fallSpeed = 0;
+                this.fallDistance = 0;
+                this.setState('walking');
             }
-            
+        }
+    }
+
+    /* ── Floating (umbrella) ──────────────────────────────── */
+
+    updateFloating() {
+        this.y += PHYSICS.FLOAT_SPEED * this.game.gameSpeed;
+
+        const floorY = this.game.terrain.findFloorBelow(this.x + this.width / 2, this.y + this.height, 3);
+        if (floorY !== null) {
+            this.y = floorY - this.height + 1;
             this.fallSpeed = 0;
             this.fallDistance = 0;
-            this.setState('walking', true);
-        }
-        
-        // Check if fallen off screen
-        if (this.y > this.game.height) {
-            this.active = false;
+            this.setState('walking');
         }
     }
-    
-    /**
-     * Update climbing behavior
-     */
+
+    /* ── Climbing ─────────────────────────────────────────── */
+
     updateClimbing() {
-        // Move upward
-        this.y -= 1 * this.game.gameSpeed;
-        
-        // Check if there's still a wall to climb
-        const hasWall = this.game.terrain.checkCollision(
-            this.x + (this.direction > 0 ? this.width - 1 : 1),
-            this.y + this.height/2
-        );
-        
-        if (!hasWall) {
-            // Reached top of the wall
-            this.x += this.direction * 2; // Step onto the ledge
-            this.setState('walking', true);
+        this.y -= PHYSICS.CLIMB_SPEED * this.game.gameSpeed;
+
+        const wallX = this.x + (this.direction > 0 ? this.width - 1 : 1);
+
+        // Still a wall to hold on to?
+        if (!this.game.terrain.checkCollision(wallX, this.y + this.height * 0.5)) {
+            // Reached the top — step onto ledge
+            this.x += this.direction * 4;
+            this.setState('walking');
             return;
         }
-        
-        // Check if there's an obstruction above
-        const hasObstruction = this.game.terrain.checkCollision(
-            this.x + this.width/2,
-            this.y
-        );
-        
-        if (hasObstruction) {
-            // Can't climb further, turn around and fall
+
+        // Ceiling above?
+        if (this.game.terrain.checkCollision(this.x + this.width / 2, this.y)) {
             this.direction *= -1;
-            this.setState('falling', true);
+            this.fallStartY = this.y;
+            this.fallSpeed = 0;
+            this.setState('falling');
         }
     }
-    
-    /**
-     * Update digging behavior
-     */    updateDigging() {
-        // Animate digging motion
-        if (this.animFrame === 3) { // Last frame of digging animation
-            // Dig a small circular area below
+
+    /* ── Digging ──────────────────────────────────────────── */
+
+    updateDigging() {
+        // Fire once per animation cycle at the "dig" frame
+        if (this.animFrame === 3 && this._lastActionFrame !== this.animFrame) {
+            this._lastActionFrame = this.animFrame;
             this.game.terrain.digCircle(
-                this.x + this.width/2, 
-                this.y + this.height, 
-                this.width/2
+                this.x + this.width / 2,
+                this.y + this.height,
+                PHYSICS.DIG_RADIUS
             );
-            
-            // Play digging sound
-            this.game.sound.playSound('dig', 0.4);
-            
-            // Move down slightly as we dig
-            this.y += 1 * this.game.gameSpeed;
+            this.game.sound.playSound('dig', 0.3);
+            this.y += 2 * this.game.gameSpeed;
         }
-        
-        // Check if we've dug through and need to fall
-        const floorY = this.game.terrain.findFloorBelow(this.x + this.width/2, this.y + this.height, 2);
+        if (this.animFrame !== 3) this._lastActionFrame = -1;
+
+        // Fell through?
+        const floorY = this.game.terrain.findFloorBelow(this.x + this.width / 2, this.y + this.height, 3);
         if (floorY === null) {
-            this.setState('falling', true);
+            this.fallStartY = this.y;
+            this.fallSpeed = 0;
+            this.setState('falling');
         }
     }
-      /**
-     * Update building behavior
-     */    updateBuilding() {
-        if (this.animFrame === 2) { // Third frame of building animation
-            // Place a bridge segment - making it wider and more continuous
-            this.game.terrain.addBridge(
-                this.x + (this.direction > 0 ? this.width - 1 : -3),
-                this.y + this.height - 2,
-                6, // Wider bridge segment (was 4)
-                1
-            );
-            
-            // Play building sound
-            this.game.sound.playSound('build', 0.4);
-            
-            // Move slightly up and forward - smaller steps for more continuous bridges
-            this.x += this.direction * 1.5 * this.game.gameSpeed; // Slower horizontal movement for denser bridge
-            this.y -= 1 * this.game.gameSpeed;
-            
-            // Check if we actually built a bridge segment by testing the terrain below
-            const bridgeCheck = this.game.terrain.findFloorBelow(
-                this.x + this.width/2,
-                this.y + this.height, 
-                5
-            );
-            
-            // If no floor below, we might be at a gap edge - build an extra segment
-            if (bridgeCheck === null) {
-                this.game.terrain.addBridge(
-                    this.x + (this.direction > 0 ? this.width : -3),
-                    this.y + this.height - 1,
-                    8, // Extra wide segment at edges
-                    2  // Extra thick segment at edges
-                );
+
+    /* ── Building ─────────────────────────────────────────── */
+
+    updateBuilding() {
+        // Place a step on the action frame (frame 2)
+        if (this.animFrame === 2 && this._lastActionFrame !== this.animFrame) {
+            this._lastActionFrame = this.animFrame;
+
+            const stepX = this.x + (this.direction > 0 ? this.width : -6);
+            const stepY = this.y + this.height - 2;
+
+            this.game.terrain.addBridge(stepX, stepY, 8, 2);
+            this.game.sound.playSound('build', 0.3);
+
+            // Step up and forward
+            this.x += this.direction * 3 * this.game.gameSpeed;
+            this.y -= 2 * this.game.gameSpeed;
+
+            this.bridgeStepsLeft--;
+
+            if (this.bridgeStepsLeft <= 0) {
+                this.setState('walking');
+                return;
             }
-            
-            this.bridgeSegmentsLeft--;
-            
-            // Check if we've built all segments
-            if (this.bridgeSegmentsLeft <= 0) {
-                this.setState('walking', true);
-            }
-            
-            // Check if we've hit an obstacle
+
+            // Hit a wall?
             if (this.game.terrain.checkCollision(
                 this.x + (this.direction > 0 ? this.width : 0),
-                this.y + this.height/2
+                this.y + this.height / 2
             )) {
-                this.setState('walking', true);
-                this.direction *= -1; // Turn around
+                this.direction *= -1;
+                this.setState('walking');
             }
         }
+        if (this.animFrame !== 2) this._lastActionFrame = -1;
     }
-    
-    /**
-     * Update blocking behavior
-     */
-    updateBlocking() {
-        // Blockers just stand in place and prevent other lemmings from passing
-        // Other lemmings will handle collision with this lemming
-    }
-    
-    /**
-     * Update bashing behavior
-     */
+
+    /* ── Bashing ──────────────────────────────────────────── */
+
     updateBashing() {
-        if (this.animFrame === 3) { // Last frame of bashing animation
-            // Bash a horizontal area in front
+        if (this.animFrame === 3 && this._lastActionFrame !== this.animFrame) {
+            this._lastActionFrame = this.animFrame;
             this.game.terrain.bashHorizontal(
-                this.x + (this.direction > 0 ? this.width : -this.width/2),
-                this.y + this.height/2,
-                this.width/2,
-                this.height - 4
+                this.x + (this.direction > 0 ? this.width : -PHYSICS.BASH_WIDTH),
+                this.y + this.height / 2,
+                PHYSICS.BASH_WIDTH,
+                PHYSICS.BASH_HEIGHT
             );
-            
-            // Move forward slightly
-            this.x += this.direction * 1 * this.game.gameSpeed;
+            this.game.sound.playSound('dig', 0.3);
+            this.x += this.direction * 2 * this.game.gameSpeed;
         }
-        
-        // Check if there's still terrain to bash
-        const hasTerrain = this.game.terrain.checkCollision(
+        if (this.animFrame !== 3) this._lastActionFrame = -1;
+
+        // No more terrain ahead?
+        if (!this.game.terrain.checkCollision(
             this.x + (this.direction > 0 ? this.width + 2 : -2),
-            this.y + this.height/2
-        );
-        
-        if (!hasTerrain) {
-            // No more terrain to bash, go back to walking
-            this.setState('walking', true);
+            this.y + this.height / 2
+        )) {
+            this.setState('walking');
         }
-        
-        // Check for floor
-        const floorY = this.game.terrain.findFloorBelow(this.x + this.width/2, this.y + this.height, 5);
+
+        // Floor check
+        const floorY = this.game.terrain.findFloorBelow(this.x + this.width / 2, this.y + this.height, PHYSICS.FLOOR_SEARCH_DISTANCE);
         if (floorY === null) {
-            // No floor below, start falling
-            this.setState('falling', true);
+            this.fallStartY = this.y;
+            this.fallSpeed = 0;
+            this.setState('falling');
         } else {
-            // Stay on floor
             this.y = floorY - this.height + 1;
         }
     }
-    
-    /**
-     * Update mining behavior
-     */
+
+    /* ── Mining ───────────────────────────────────────────── */
+
     updateMining() {
-        if (this.animFrame === 5) { // Last frame of mining animation
-            // Mine a diagonal area in front and below
-            this.game.terrain.mineDigonal(
+        if (this.animFrame === 5 && this._lastActionFrame !== this.animFrame) {
+            this._lastActionFrame = this.animFrame;
+            this.game.terrain.mineDiagonal(
                 this.x + (this.direction > 0 ? this.width : 0),
-                this.y + this.height/2,
-                this.width,
-                this.height/2,
+                this.y + this.height / 2,
+                PHYSICS.MINE_WIDTH,
+                PHYSICS.MINE_HEIGHT,
                 this.direction
             );
-            
-            // Move down and forward
+            this.game.sound.playSound('dig', 0.3);
             this.x += this.direction * 2 * this.game.gameSpeed;
             this.y += 2 * this.game.gameSpeed;
         }
-        
-        // Check if there's still terrain to mine
-        const hasTerrain = this.game.terrain.checkCollision(
+        if (this.animFrame !== 5) this._lastActionFrame = -1;
+
+        // No terrain below-ahead?
+        if (!this.game.terrain.checkCollision(
             this.x + (this.direction > 0 ? this.width + 1 : -1),
             this.y + this.height - 2
-        );
-        
-        if (!hasTerrain) {
-            // No more terrain to mine, go to falling state
-            this.setState('falling', true);
-        }
-    }
-    
-    /**
-     * Update floating behavior
-     */
-    updateFloating() {
-        // Slow fall with umbrella
-        this.y += 1 * this.game.gameSpeed;
-        
-        // Check for landing
-        const floorY = this.game.terrain.findFloorBelow(this.x + this.width/2, this.y + this.height, 2);
-        if (floorY !== null) {
-            // Land on floor
-            this.y = floorY - this.height + 1;
+        )) {
+            this.fallStartY = this.y;
             this.fallSpeed = 0;
-            this.setState('walking', true);
-        }
-        
-        // Check if fallen off screen
-        if (this.y > this.game.height) {
-            this.active = false;
+            this.setState('falling');
         }
     }
-      /**
-     * Update exploding behavior
-     */
+
+    /* ── Exploding (bomber) ───────────────────────────────── */
+
     updateExploding(deltaTime) {
-        // Handle countdown timer if we're in the pre-explosion phase
-        if (this.animFrame < 4) {  // First 4 frames are blinking
-            this.countdownTimer -= deltaTime / 1000;  // Convert to seconds
-            
-            if (this.countdownTimer <= 0) {
-                // Skip to explosion frames
-                this.stateTime = 4 * this.game.assets.animations[this.state].frameDuration;
-            }
-        } else if (this.animFrame === 7) {  // Last explosion frame
-            // Create a big explosion
+        // First phase: blinking "Oh No!" (frames 0-7)
+        if (this.animFrame < 8) {
+            // Wait for explosion frames to be reached by animation
+        } else if (this.animFrame >= 12 && this._lastActionFrame !== 12) {
+            // Explode: destroy terrain
+            this._lastActionFrame = 12;
             this.game.terrain.digCircle(
-                this.x + this.width/2,
-                this.y + this.height/2,
+                this.x + this.width / 2,
+                this.y + this.height / 2,
                 this.width
             );
-            
-            // Play explosion sound
-            this.game.sound.playSound('explosion', 0.7);
-            
-            // Remove the lemming
+            this.game.sound.playSound('explosion', 0.6);
             this.active = false;
         }
     }
-      /**
-     * Update exiting behavior
-     */
+
+    /* ── Splatting (fall death) ────────────────────────────── */
+
+    updateSplatting() {
+        // Brief death animation then remove
+        if (this.stateTime > 600) {
+            this.active = false;
+        }
+    }
+
+    /* ── Exiting ──────────────────────────────────────────── */
+
     updateExiting() {
-        // Play exit sound once when entering exit
         if (this.animFrame === 0 && this.stateTime < 50) {
             this.game.sound.playSound('exit', 0.5);
         }
-        
-        if (this.animFrame >= 9) {  // Last frame of exit animation
-            // Lemming has fully exited
+        if (this.animFrame >= 9) {
             this.active = false;
             this.saved = true;
             this.game.lemmingSaved();
         }
     }
-    
-    /**
-     * Check collision with another lemming (for blocker interaction)
-     */
-    checkCollisionWithLemming(otherLemming) {
-        if (!otherLemming.active || otherLemming.state !== 'blocking') return false;
-        
-        const myBox = {
-            x: this.x,
-            y: this.y,
-            width: this.width,
-            height: this.height
-        };
-        
-        const otherBox = {
-            x: otherLemming.x,
-            y: otherLemming.y,
-            width: otherLemming.width,
-            height: otherLemming.height
-        };
-        
-        return rectsOverlap(myBox, otherBox);
+
+    /* ── Blocker collision ────────────────────────────────── */
+
+    checkCollisionWithLemming(other) {
+        if (!other.active || other.state !== 'blocking') return false;
+        return rectsOverlap(
+            { x: this.x, y: this.y, width: this.width, height: this.height },
+            { x: other.x, y: other.y, width: other.width, height: other.height }
+        );
     }
-    
-    /**
-     * Render lemming
-     */
+
+    /* ── Rendering ────────────────────────────────────────── */
+
     render(ctx) {
         if (!this.active) return;
-        
-        // Draw lemming based on current state and animation frame
-        this.game.assets.drawAnimationFrame(
-            ctx,
-            this.x,
-            this.y,
-            this.state,
-            this.animFrame,
-            this.direction
-        );
-        
-        // Draw countdown for exploding lemmings
-        if (this.state === 'exploding' && this.animFrame < 4) {
+
+        // Draw the animated sprite
+        this.game.assets.drawAnimationFrame(ctx, this.x, this.y, this.state, this.animFrame, this.direction);
+
+        // Bomber countdown number
+        if (this.isBomber && this.state !== 'exploding' && this.state !== 'splatting') {
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = '10px Arial';
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
             ctx.fillText(
-                Math.ceil(this.countdownTimer).toString(),
-                this.x + this.width/2 - 3,
-                this.y - 5
+                Math.ceil(this.bomberCountdown).toString(),
+                this.x + this.width / 2,
+                this.y - 4
             );
+            ctx.textAlign = 'left';
+        }
+
+        // "Oh No!" text during explosion countdown
+        if (this.state === 'exploding' && this.animFrame < 8) {
+            ctx.fillStyle = '#FF4444';
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('Oh No!', this.x + this.width / 2, this.y - 4);
+            ctx.textAlign = 'left';
         }
     }
 }

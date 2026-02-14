@@ -1,257 +1,189 @@
 /**
  * Terrain system for the Lemmings game
  * Handles terrain rendering, collision detection and modification
+ * Uses cached collision data for O(1) point queries
  */
-import { COLORS, rectsOverlap } from './utils.js';
+// Terrain colours are handled by assets.js drawTerrain()
 
 export class Terrain {
     constructor(game, width, height) {
         this.game = game;
         this.width = width;
         this.height = height;
-        
-        // Create terrain canvas (used for collision detection)
+
+        // Offscreen canvas for terrain modification (compositing ops)
         this.canvas = document.createElement('canvas');
         this.canvas.width = width;
         this.canvas.height = height;
         this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
-        
-        // Terrain data structures
-        this.terrainSegments = []; // Stores terrain segments for rendering
-        this.entry = null;         // Entry point coordinates
-        this.exit = null;          // Exit point coordinates
-        
-        // Initialize with a blank terrain
+
+        // Cached collision data — avoids per-pixel getImageData calls
+        this._collisionData = null;
+        this._collisionDirty = true;
+
+        // Visual terrain segments for rendering
+        this.terrainSegments = [];
+        this.entry = null;
+        this.exit = null;
+
         this.clear();
     }
-    
-    /**
-     * Clear the terrain
-     */
+
+    /* ── Collision data cache ─────────────────────────────── */
+
+    /** Sync the cached ImageData from the offscreen canvas */
+    _syncCollision() {
+        this._collisionData = this.ctx.getImageData(0, 0, this.width, this.height);
+        this._collisionDirty = false;
+    }
+
+    /** Mark collision cache as stale (call after any terrain modification) */
+    _invalidateCollision() {
+        this._collisionDirty = true;
+    }
+
+    /* ── Basic operations ─────────────────────────────────── */
+
     clear() {
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0)';
         this.ctx.clearRect(0, 0, this.width, this.height);
         this.terrainSegments = [];
         this.entry = null;
         this.exit = null;
+        this._invalidateCollision();
     }
-    
-    /**
-     * Add a rectangular terrain segment
-     */
-    addRect(x, y, width, height, type = 'dirt') {
-        this.terrainSegments.push({
-            type: type,
-            x: x,
-            y: y,
-            width: width,
-            height: height
-        });
-        
-        // Also add to collision canvas
-        this.ctx.fillStyle = '#FF0000'; // Color doesn't matter, just needs to be opaque
-        this.ctx.fillRect(x, y, width, height);
+
+    /** Add a rectangular terrain segment */
+    addRect(x, y, w, h, type = 'dirt') {
+        x = Math.round(x);
+        y = Math.round(y);
+        w = Math.round(w);
+        h = Math.round(h);
+        this.terrainSegments.push({ type, x, y, width: w, height: h });
+        this.ctx.fillStyle = '#FF0000';
+        this.ctx.fillRect(x, y, w, h);
+        this._invalidateCollision();
     }
-    
-    /**
-     * Set the entry point
-     */
-    setEntry(x, y) {
-        this.entry = { x, y };
-    }
-    
-    /**
-     * Set the exit point
-     */
-    setExit(x, y) {
-        this.exit = { x, y };
-    }
-    
-    /**
-     * Check if a point collides with terrain
-     */
+
+    setEntry(x, y) { this.entry = { x: Math.round(x), y: Math.round(y) }; }
+    setExit(x, y)  { this.exit  = { x: Math.round(x), y: Math.round(y) }; }
+
+    /* ── Collision queries (use cached data) ───────────────── */
+
+    /** Point collision — O(1) array lookup */
     checkCollision(x, y) {
-        if (x < 0 || y < 0 || x >= this.width || y >= this.height) {
-            return false;
-        }
-        
-        const pixel = this.ctx.getImageData(x, y, 1, 1).data;
-        // Check if the pixel has any opacity (alpha > 0)
-        return pixel[3] > 0;
+        const ix = Math.floor(x);
+        const iy = Math.floor(y);
+        if (ix < 0 || iy < 0 || ix >= this.width || iy >= this.height) return false;
+        if (this._collisionDirty) this._syncCollision();
+        return this._collisionData.data[(iy * this.width + ix) * 4 + 3] > 0;
     }
-    
-    /**
-     * Check if a rectangle collides with terrain
-     */
-    checkRectCollision(x, y, width, height) {
-        // For better performance, only check corners and center point
-        return this.checkCollision(x, y) || 
-               this.checkCollision(x + width, y) ||
-               this.checkCollision(x, y + height) ||
-               this.checkCollision(x + width, y + height) ||
-               this.checkCollision(x + width/2, y + height/2);
+
+    /** Rectangle collision — checks edges and center */
+    checkRectCollision(x, y, w, h) {
+        return this.checkCollision(x, y) ||
+               this.checkCollision(x + w, y) ||
+               this.checkCollision(x, y + h) ||
+               this.checkCollision(x + w, y + h) ||
+               this.checkCollision(x + w / 2, y + h / 2);
     }
-      /**
-     * Find the floor below a point (for walking lemmings)
-     */
-    findFloorBelow(x, y, maxDistance = 10) {
-        for (let checkY = y; checkY < y + maxDistance; checkY++) {
-            // Check a few pixels horizontally around the point to better detect narrow bridges
-            for (let xOffset = -1; xOffset <= 1; xOffset++) {
-                if (this.checkCollision(x + xOffset, checkY)) {
-                    return checkY - 1; // Return the y-coordinate just above the floor
+
+    /** Find the nearest solid pixel below (x, y) within maxDistance.
+     *  Returns the y just above the solid pixel, or null. */
+    findFloorBelow(x, y, maxDistance = 6) {
+        if (this._collisionDirty) this._syncCollision();
+        const ix = Math.floor(x);
+        const startY = Math.floor(y);
+        const endY = Math.min(startY + maxDistance, this.height - 1);
+        const data = this._collisionData.data;
+        const w = this.width;
+        for (let iy = startY; iy <= endY; iy++) {
+            // Check center pixel and ±1 for narrow bridges
+            for (let dx = -1; dx <= 1; dx++) {
+                const cx = ix + dx;
+                if (cx < 0 || cx >= w) continue;
+                if (data[(iy * w + cx) * 4 + 3] > 0) {
+                    return iy - 1;
                 }
             }
         }
-        return null; // No floor found within maxDistance
+        return null;
     }
-    
-    /**
-     * Check if a point is at the exit
-     */
+
+    /** Check whether a point is within the exit zone */
     checkExit(x, y) {
         if (!this.exit) return false;
-        
-        return (x >= this.exit.x + 8 && x <= this.exit.x + 24 &&
-                y >= this.exit.y && y <= this.exit.y + 16);
+        return x >= this.exit.x + 6 && x <= this.exit.x + 26 &&
+               y >= this.exit.y - 4 && y <= this.exit.y + 20;
     }
-    
-    /**
-     * Remove terrain in a circular area (for digging)
-     */
+
+    /* ── Terrain modification ─────────────────────────────── */
+
+    /** Dig a circular hole */
     digCircle(x, y, radius) {
-        // Clear in the collision canvas
         this.ctx.save();
         this.ctx.globalCompositeOperation = 'destination-out';
         this.ctx.beginPath();
         this.ctx.arc(x, y, radius, 0, Math.PI * 2);
         this.ctx.fill();
         this.ctx.restore();
-        
-        // We don't need to modify terrainSegments as we draw them underneath,
-        // and the collision check will handle it correctly
+        this._invalidateCollision();
     }
-    
-    /**
-     * Remove terrain in a horizontal line (for bashing)
-     */
+
+    /** Bash a horizontal rectangle in front of a lemming */
     bashHorizontal(x, y, width, height) {
-        // Clear in the collision canvas
         this.ctx.save();
         this.ctx.globalCompositeOperation = 'destination-out';
-        this.ctx.fillRect(x, y - height/2, width, height);
+        this.ctx.fillRect(x, y - height / 2, width, height);
         this.ctx.restore();
+        this._invalidateCollision();
     }
-    
-    /**
-     * Remove terrain in a diagonal line (for mining)
-     */
-    mineDigonal(x, y, width, height, direction) {
+
+    /** Mine a diagonal area */
+    mineDiagonal(x, y, width, height, direction) {
         this.ctx.save();
         this.ctx.globalCompositeOperation = 'destination-out';
-        
         this.ctx.beginPath();
         if (direction > 0) {
-            // Mine to the right
-            this.ctx.moveTo(x, y);
-            this.ctx.lineTo(x + width, y + height);
-            this.ctx.lineTo(x + width, y);
-            this.ctx.closePath();
+            this.ctx.moveTo(x, y - height / 2);
+            this.ctx.lineTo(x + width, y + height / 2);
+            this.ctx.lineTo(x + width, y - height / 2);
         } else {
-            // Mine to the left
-            this.ctx.moveTo(x, y);
-            this.ctx.lineTo(x - width, y + height);
-            this.ctx.lineTo(x, y + height);
-            this.ctx.closePath();
+            this.ctx.moveTo(x, y - height / 2);
+            this.ctx.lineTo(x - width, y + height / 2);
+            this.ctx.lineTo(x - width, y - height / 2);
         }
+        this.ctx.closePath();
         this.ctx.fill();
-        
         this.ctx.restore();
-    }    /**
-     * Add a bridge segment (for building)
-     */
-    addBridge(x, y, width, height) {
-        // Make bridges wider and thicker to ensure lemmings walk on them
-        // Wider bridges are easier to walk on
-        const enhancedWidth = width + 2;
-        const enhancedHeight = height + 1;
-        
-        this.addRect(x - 1, y, enhancedWidth, enhancedHeight, 'dirt');
-        
-        // Add a visual indicator that this is a bridge
-        this.addRect(x - 1, y + enhancedHeight, enhancedWidth, 1, 'rock');
-        
-        // Add some debug logging
-        console.log("Enhanced bridge built at:", x, y, "width:", enhancedWidth, "height:", enhancedHeight);
+        this._invalidateCollision();
     }
-    
-    /**
-     * Render the terrain to the game canvas
-     */
+
+    /** Add a bridge step (builder ability) */
+    addBridge(x, y, width, height) {
+        this.addRect(x, y, width, height, 'bridge');
+    }
+
+    /* ── Rendering ────────────────────────────────────────── */
+
     render(ctx) {
-        // Draw all terrain segments
-        this.terrainSegments.forEach(segment => {
-            this.game.assets.drawTerrain(
-                ctx, 
-                segment.x, 
-                segment.y, 
-                segment.width, 
-                segment.height, 
-                segment.type
-            );
-        });
-        
-        // Draw entry and exit points
-        if (this.entry) {
-            this.game.assets.drawEntry(ctx, this.entry.x, this.entry.y);
+        // Draw terrain segments
+        for (const seg of this.terrainSegments) {
+            this.game.assets.drawTerrain(ctx, seg.x, seg.y, seg.width, seg.height, seg.type);
         }
-        
-        if (this.exit) {
-            this.game.assets.drawExit(ctx, this.exit.x, this.exit.y);
-        }
-    }    /**
-     * Debug rendering to visualize collision map
-     */
+        // Entry & exit
+        if (this.entry) this.game.assets.drawEntry(ctx, this.entry.x, this.entry.y);
+        if (this.exit)  this.game.assets.drawExit(ctx, this.exit.x, this.exit.y);
+    }
+
+    /** Debug overlay showing the collision canvas */
     debugRender(ctx) {
-        // Draw collision map with semi-transparency
         ctx.save();
-        ctx.globalAlpha = 0.5;
+        ctx.globalAlpha = 0.4;
         ctx.drawImage(this.canvas, 0, 0);
-        
-        // Highlight the gap if this is level 1
-        if (this.game.levelManager && 
-            this.game.levelManager.currentLevel && 
-            this.game.levelManager.currentLevel.id === 1) {
-            
-            const width = this.game.width;
-            const height = this.game.height;
-            const gapWidth = 100;
-            const gapX = width/2 - gapWidth/2;
-            
-            // Draw a highlight around the gap
-            ctx.globalAlpha = 0.3;
-            ctx.fillStyle = 'red';
-            ctx.fillRect(gapX, height - 70, gapWidth, 40);
-            
-            // Draw border around gap
-            ctx.globalAlpha = 0.8;
-            ctx.strokeStyle = 'yellow';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(gapX, height - 70, gapWidth, 40);
-            
-            // Add text indicating "GAP HERE!"
-            ctx.globalAlpha = 1;
-            ctx.fillStyle = 'red';
-            ctx.font = '18px Arial';
-            ctx.fillText('GAP HERE!', gapX + 10, height - 80);
-            
-            // Draw bridge-building hints
-            ctx.fillStyle = 'white';
-            ctx.font = '14px Arial';
-            ctx.fillText('1. Select Builder ability (5)', 20, 200);
-            ctx.fillText('2. Click on lemming at edge of gap', 20, 220);
-            ctx.fillText('3. Wait for bridge to complete', 20, 240);
-        }
         ctx.restore();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '12px monospace';
+        ctx.fillText('Debug: collision overlay (press D to toggle)', 10, this.game.height - 10);
     }
 }

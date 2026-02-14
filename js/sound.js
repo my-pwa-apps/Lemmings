@@ -31,7 +31,7 @@ export class SoundManager {
             // Generate sounds
             this.generateSounds();
             
-            console.log("Sound system initialized");
+            // Sound system ready
         } catch(e) {
             console.warn("Web Audio API not supported");
             this.audioContext = null;
@@ -423,7 +423,7 @@ export class SoundManager {
             try {
                 this.currentMusicLoop.stop();
             } catch (e) {
-                console.log("Couldn't stop music (might already be stopped):", e);
+                // Music may already be stopped
             }
             this.currentMusicLoop = null;
         }

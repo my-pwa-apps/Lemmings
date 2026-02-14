@@ -1,173 +1,278 @@
 /**
  * Level definitions for the Lemmings game
+ * Each level specifies terrain layout, abilities, and win conditions
  */
 
 export class Level {
-    constructor(id, name, properties) {
+    constructor(id, name, props) {
         this.id = id;
         this.name = name;
-        
-        // Default properties
+
+        // Defaults
         this.lemmingCount = 10;
-        this.releaseRate = 1; // Lemmings per second
-        this.timeLimit = 300; // Seconds
+        this.releaseRate = 1;
+        this.timeLimit = 300;
         this.requiredSaveCount = 5;
-        
-        // Ability counts
         this.abilities = {
-            climber: 0,
-            floater: 0,
-            bomber: 0,
-            blocker: 0,
-            builder: 0,
-            basher: 0,
-            miner: 0,
-            digger: 0
+            climber: 0, floater: 0, bomber: 0, blocker: 0,
+            builder: 0, basher: 0, miner: 0, digger: 0
         };
-        
-        // Override with provided properties
-        if (properties) {
-            Object.assign(this, properties);
-        }
+        this.buildFunction = null;
+
+        if (props) Object.assign(this, props);
     }
-    
-    /**
-     * Build this level in the game
-     */
+
     build(game) {
-        // Reset terrain first
         game.terrain.clear();
-        
-        // Call the level-specific build function
         if (this.buildFunction) {
             this.buildFunction(game);
         } else {
             this.buildDefault(game);
         }
     }
-    
-    /**
-     * Default level builder (simple flat terrain)
-     */
+
     buildDefault(game) {
-        const width = game.width;
-        const height = game.height;
-        
-        // Add ground
-        game.terrain.addRect(0, height - 40, width, 40, 'dirt');
-        
-        // Add entry and exit
-        game.terrain.setEntry(50, 50);
-        game.terrain.setExit(width - 100, height - 64);
+        const w = game.width, h = game.height;
+        game.terrain.addRect(0, h - 40, w, 40, 'dirt');
+        game.terrain.setEntry(60, 60);
+        game.terrain.setExit(w - 100, h - 64);
     }
 }
 
 /**
- * Level manager class
+ * Level manager
  */
 export class LevelManager {
     constructor(game) {
         this.game = game;
         this.levels = [];
         this.currentLevel = null;
-        
         this.createLevels();
     }
-      /**
-     * Get all levels
-     */
-    getAllLevels() {
-        return this.levels;
-    }
-    
-    /**
-     * Get current level
-     */
-    getCurrentLevel() {
-        return this.currentLevel;
-    }
-    
-    /**
-     * Load a specific level by ID
-     */
+
+    getAllLevels()    { return this.levels; }
+    getCurrentLevel() { return this.currentLevel; }
+
     loadLevel(id) {
         const level = this.levels.find(l => l.id === id);
         if (!level) return false;
-        
+        // Restore original ability counts on retry
+        if (level._originalAbilities) {
+            level.abilities = { ...level._originalAbilities };
+        }
         this.currentLevel = level;
         level.build(this.game);
         return true;
     }
-    
-    /**
-     * Create all game levels
-     */
+
+    /* ── Level definitions ────────────────────────────────── */
+
     createLevels() {
-        // Level 1: Bridge the Gap
-        this.levels.push(new Level(1, "Bridge the Gap", {
+        // ─── Level 1 : Just Dig! ───────────────────────────
+        this.levels.push(new Level(1, 'Just Dig!', {
             lemmingCount: 10,
-            releaseRate: 0.8, // Slower release rate to give more time
+            releaseRate: 0.8,
             timeLimit: 300,
             requiredSaveCount: 5,
             abilities: {
-                climber: 0,
-                floater: 2, // Add some floaters as safety
-                bomber: 1, // Add bomber for emergencies
-                blocker: 1, // Add blocker to control flow
-                builder: 5, // More builders for bridging attempts
-                basher: 0,
-                miner: 0,
-                digger: 3
-            },            buildFunction: (game) => {
-                const width = game.width;
-                const height = game.height;
-                    // Base ground - making it more visible
-                game.terrain.addRect(0, height - 40, width, 40, 'dirt');                // Create an entry platform - much closer to the entry point
-                const entryX = width/4 - 50; // Position for entry platform
-                const entryY = height/3 + 20; // Height of the entry platform - moved up to be closer to entry
-                game.terrain.addRect(entryX, entryY, 100, 10, 'dirt'); // Platform under entry
-                
-                // Create a safe path down with a staircase/ramp
-                const stepCount = 5;
-                const stepWidth = 80;
-                const stepHeight = 10;
-                const totalHeight = height - 40 - entryY - 10;
-                const heightPerStep = totalHeight / stepCount;
-                
-                for (let i = 0; i < stepCount; i++) {
-                    game.terrain.addRect(
-                        entryX + 10, // Offset a bit from the platform edge
-                        entryY + 10 + (i * heightPerStep),
-                        stepWidth - (i * 10), // Each step gets narrower
-                        stepHeight,
-                        'dirt'
-                    );
-                }
-                
-                // Create a clearly defined gap in the middle - larger and more obvious
-                // Use rectangular gap instead of circular
-                const gapWidth = 100;
-                const gapX = width/2 - gapWidth/2;
-                game.terrain.ctx.save();
-                game.terrain.ctx.globalCompositeOperation = 'destination-out';
-                game.terrain.ctx.fillRect(gapX, height - 40, gapWidth, 40);
-                game.terrain.ctx.restore();
-                
-                // Add more prominent visual indicators around the gap
-                game.terrain.addRect(gapX - 10, height - 45, 10, 10, 'rock'); // Left warning marker
-                game.terrain.addRect(gapX + gapWidth, height - 45, 10, 10, 'rock'); // Right warning marker
-                
-                // Add arrow indicators pointing to the gap
-                for (let i = 0; i < 3; i++) {
-                    // Left side arrows
-                    game.terrain.addRect(gapX - 30 - (i * 15), height - 60, 10, 5, 'rock');
-                    // Right side arrows
-                    game.terrain.addRect(gapX + gapWidth + 20 + (i * 15), height - 60, 10, 5, 'rock');
-                }                // Entry point - positioned directly above the entry platform
-                game.terrain.setEntry(width/4, entryY - 20); // Right above the platform with minimal falling distance
-                
-                // Exit point - positioned on the right side
-                game.terrain.setExit(width - 100, height - 64);
+                climber: 0, floater: 0, bomber: 0, blocker: 0,
+                builder: 0, basher: 0, miner: 0, digger: 10
+            },
+            buildFunction: (game) => {
+                const w = game.width, h = game.height;
+
+                // Top platform (entry)
+                game.terrain.addRect(80, 120, 200, 20, 'dirt');
+                game.terrain.setEntry(150, 96);
+
+                // Thick middle layer — lemmings must dig through
+                game.terrain.addRect(0, 250, w, 60, 'dirt');
+
+                // Ground
+                game.terrain.addRect(0, h - 40, w, 40, 'dirt');
+
+                // Exit on the ground
+                game.terrain.setExit(w / 2 - 16, h - 64);
             }
-        }));    }
+        }));
+
+        // ─── Level 2 : Bridge the Gap ──────────────────────
+        this.levels.push(new Level(2, 'Bridge the Gap', {
+            lemmingCount: 10,
+            releaseRate: 0.7,
+            timeLimit: 300,
+            requiredSaveCount: 6,
+            abilities: {
+                climber: 0, floater: 2, bomber: 0, blocker: 1,
+                builder: 5, basher: 0, miner: 0, digger: 0
+            },
+            buildFunction: (game) => {
+                const w = game.width, h = game.height;
+
+                // Left platform
+                game.terrain.addRect(0, h - 50, w / 2 - 60, 50, 'dirt');
+
+                // Right platform
+                game.terrain.addRect(w / 2 + 60, h - 50, w / 2 - 60, 50, 'dirt');
+
+                // Entry above left platform
+                game.terrain.addRect(60, 160, 140, 16, 'dirt');
+                game.terrain.setEntry(100, 136);
+
+                // Ramp from entry to left ground
+                for (let i = 0; i < 6; i++) {
+                    game.terrain.addRect(60 + i * 20, 176 + i * 40, 80, 10, 'dirt');
+                }
+
+                // Exit on right platform
+                game.terrain.setExit(w - 120, h - 74);
+            }
+        }));
+
+        // ─── Level 3 : Bash Through ────────────────────────
+        this.levels.push(new Level(3, 'Bash Through', {
+            lemmingCount: 15,
+            releaseRate: 1,
+            timeLimit: 240,
+            requiredSaveCount: 10,
+            abilities: {
+                climber: 0, floater: 0, bomber: 0, blocker: 2,
+                builder: 0, basher: 5, miner: 0, digger: 0
+            },
+            buildFunction: (game) => {
+                const w = game.width, h = game.height;
+
+                // Ground
+                game.terrain.addRect(0, h - 40, w, 40, 'dirt');
+
+                // Entry platform
+                game.terrain.addRect(30, 180, 120, 14, 'dirt');
+                game.terrain.setEntry(70, 156);
+
+                // Slope from entry to ground
+                for (let i = 0; i < 5; i++) {
+                    game.terrain.addRect(30, 194 + i * 50, 100 - i * 10, 10, 'dirt');
+                }
+
+                // Three rock walls blocking the path
+                game.terrain.addRect(280, h - 140, 20, 100, 'rock');
+                game.terrain.addRect(480, h - 140, 20, 100, 'rock');
+                game.terrain.addRect(680, h - 140, 20, 100, 'rock');
+
+                // Exit at far end
+                game.terrain.setExit(w - 80, h - 64);
+            }
+        }));
+
+        // ─── Level 4 : Mine Your Way ───────────────────────
+        this.levels.push(new Level(4, 'Mine Your Way', {
+            lemmingCount: 12,
+            releaseRate: 0.8,
+            timeLimit: 300,
+            requiredSaveCount: 8,
+            abilities: {
+                climber: 0, floater: 3, bomber: 0, blocker: 0,
+                builder: 0, basher: 0, miner: 5, digger: 2
+            },
+            buildFunction: (game) => {
+                const w = game.width, h = game.height;
+
+                // Entry high up
+                game.terrain.addRect(100, 80, 150, 14, 'dirt');
+                game.terrain.setEntry(150, 56);
+
+                // Series of thick diagonal platforms — need to mine through
+                game.terrain.addRect(60, 180, 300, 30, 'dirt');
+                game.terrain.addRect(200, 300, 350, 30, 'dirt');
+                game.terrain.addRect(100, 420, 300, 30, 'dirt');
+
+                // Ground
+                game.terrain.addRect(0, h - 40, w, 40, 'dirt');
+
+                // Exit at bottom-right
+                game.terrain.setExit(w - 100, h - 64);
+            }
+        }));
+
+        // ─── Level 5 : The Climb ───────────────────────────
+        this.levels.push(new Level(5, 'The Climb', {
+            lemmingCount: 10,
+            releaseRate: 0.6,
+            timeLimit: 360,
+            requiredSaveCount: 7,
+            abilities: {
+                climber: 10, floater: 5, bomber: 2, blocker: 2,
+                builder: 3, basher: 0, miner: 0, digger: 0
+            },
+            buildFunction: (game) => {
+                const w = game.width, h = game.height;
+
+                // Ground
+                game.terrain.addRect(0, h - 40, w, 40, 'dirt');
+
+                // Entry on ground level
+                game.terrain.setEntry(60, h - 64);
+
+                // Tall walls to climb
+                game.terrain.addRect(200, h - 200, 20, 160, 'rock');
+                game.terrain.addRect(400, h - 280, 20, 240, 'rock');
+                game.terrain.addRect(600, h - 200, 20, 160, 'rock');
+
+                // Platforms at top of walls
+                game.terrain.addRect(200, h - 200, 100, 14, 'dirt');
+                game.terrain.addRect(400, h - 280, 100, 14, 'dirt');
+                game.terrain.addRect(600, h - 200, 100, 14, 'dirt');
+
+                // Exit high up on a platform
+                game.terrain.addRect(780, h - 160, 120, 14, 'dirt');
+                game.terrain.setExit(820, h - 184);
+            }
+        }));
+
+        // ─── Level 6 : Combination ─────────────────────────
+        this.levels.push(new Level(6, 'Use Them All', {
+            lemmingCount: 20,
+            releaseRate: 1,
+            timeLimit: 420,
+            requiredSaveCount: 15,
+            abilities: {
+                climber: 3, floater: 3, bomber: 2, blocker: 2,
+                builder: 5, basher: 3, miner: 3, digger: 3
+            },
+            buildFunction: (game) => {
+                const w = game.width, h = game.height;
+
+                // Entry high-left
+                game.terrain.addRect(40, 100, 160, 14, 'dirt');
+                game.terrain.setEntry(90, 76);
+
+                // Thick platform to dig through
+                game.terrain.addRect(40, 200, 200, 40, 'dirt');
+
+                // Rock wall to bash
+                game.terrain.addRect(340, 200, 20, 200, 'rock');
+
+                // Middle platform
+                game.terrain.addRect(360, 300, 200, 14, 'dirt');
+
+                // Gap needing a bridge
+                // Right platform
+                game.terrain.addRect(660, 300, 200, 14, 'dirt');
+
+                // Thick layer to mine through
+                game.terrain.addRect(600, 400, 300, 40, 'dirt');
+
+                // Ground
+                game.terrain.addRect(0, h - 40, w, 40, 'dirt');
+
+                // Exit bottom-right
+                game.terrain.setExit(w - 80, h - 64);
+            }
+        }));
+
+        // Store original ability counts for retry
+        for (const level of this.levels) {
+            level._originalAbilities = { ...level.abilities };
+        }
+    }
 }

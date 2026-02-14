@@ -1,28 +1,62 @@
 /**
- * Utility functions for the Lemmings game
+ * Utility functions and constants for the Lemmings game
+ * Colors match the classic Amiga Lemmings aesthetic
  */
 
-// Color palette for the game
+// Physics constants
+const PHYSICS = {
+    GRAVITY: 0.15,
+    MAX_FALL_SPEED: 4,
+    WALK_SPEED: 0.8,
+    CLIMB_SPEED: 0.8,
+    FLOAT_SPEED: 0.8,
+    FALL_DEATH_DISTANCE: 100,   // pixels (at 2x scale) before lethal fall
+    BUILDER_STEPS: 12,
+    BOMBER_COUNTDOWN: 5,        // seconds
+    DIG_RADIUS: 6,
+    BASH_WIDTH: 6,
+    BASH_HEIGHT: 14,
+    MINE_WIDTH: 10,
+    MINE_HEIGHT: 8,
+    FLOOR_SEARCH_DISTANCE: 6,
+    STEP_UP_HEIGHT: 6,          // max height a walker can step up
+};
+
+// Color palette — faithful to original Amiga Lemmings
 const COLORS = {
-    BACKGROUND: '#000000',
+    BACKGROUND: '#000033',
     BACKGROUND_GRADIENT: {
-        TOP: '#000022',
-        BOTTOM: '#003366'
+        TOP: '#000033',
+        BOTTOM: '#000066'
     },
     TERRAIN: {
-        DIRT: '#8B4513',
-        ROCK: '#696969',
-        ENTRY: '#4682B4',
-        EXIT: '#32CD32'
+        DIRT: '#8B5E3C',
+        DIRT_DARK: '#6B3F1C',
+        GRASS: '#4CAF50',
+        GRASS_TIP: '#66CC66',
+        ROCK: '#707070',
+        ROCK_LIGHT: '#909090',
+        BRIDGE: '#C0A060',
+        ENTRY: '#5588BB',
+        ENTRY_DOOR: '#1A1A40',
+        EXIT: '#44AA44',
+        EXIT_GLOW: '#88FF88'
     },
     LEMMING: {
-        BODY: '#00BFFF',
-        HAIR: '#FFD700',
-        OUTFIT: '#1E90FF'
+        BODY: '#00CC00',        // Classic green body
+        HAIR: '#00AAFF',        // Blue hair
+        OUTFIT: '#00CC00',      // Green outfit
+        SKIN: '#FFD0A0'         // Skin tone for face
+    },
+    UI: {
+        PANEL_BG: '#2A1A4A',
+        PANEL_BORDER: '#5544AA',
+        TEXT: '#CCFFCC',
+        HIGHLIGHT: '#FFFF00'
     }
 };
 
-export { COLORS, clamp, rectsOverlap, formatTime, getRandomInt, Easing };
+export { COLORS, PHYSICS, clamp, rectsOverlap, formatTime, getRandomInt, Easing };
 
 /**
  * Clamp a value between min and max
@@ -63,27 +97,16 @@ function getRandomInt(min, max) {
  * Easing functions
  */
 const Easing = {
-    // Linear interpolation
     linear: (t) => t,
-    
-    // Quadratic easing
     easeInQuad: (t) => t * t,
     easeOutQuad: (t) => t * (2 - t),
     easeInOutQuad: (t) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
-    
-    // Bounce effect
     easeOutBounce: (t) => {
         const n1 = 7.5625;
         const d1 = 2.75;
-        
-        if (t < 1 / d1) {
-            return n1 * t * t;
-        } else if (t < 2 / d1) {
-            return n1 * (t -= 1.5 / d1) * t + 0.75;
-        } else if (t < 2.5 / d1) {
-            return n1 * (t -= 2.25 / d1) * t + 0.9375;
-        } else {
-            return n1 * (t -= 2.625 / d1) * t + 0.984375;
-        }
+        if (t < 1 / d1) return n1 * t * t;
+        if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75;
+        if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
+        return n1 * (t -= 2.625 / d1) * t + 0.984375;
     }
 };
